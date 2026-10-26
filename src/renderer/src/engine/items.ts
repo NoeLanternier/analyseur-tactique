@@ -32,7 +32,12 @@ export interface NextBuy {
   affordable: boolean
   /** Composant le plus cher achetable maintenant si l'objet complet ne l'est pas. */
   component: ItemInfo | null
+  /** Inventaire plein : objet à vendre pour faire de la place. */
+  sellHint?: string
 }
+
+/** 6 emplacements : bottes + 5 objets légendaires (le familier se vend en fin de partie). */
+const MAX_LEGENDARIES = 5
 
 export interface ItemPlan {
   starter: ItemInfo[]
@@ -336,8 +341,9 @@ export function buildItemPlan(
   else if (boots.item)
     steps.push({ item: boots.item, kind: 'boots', owned: false, reason: boots.reason })
 
-  // Composant anti-soins tôt si nécessaire.
-  if (m.heal >= 0.5) {
+  // Composant anti-soins tôt si nécessaire (seulement en début de build : plus tard, c'est l'objet
+  // anti-soins complet qui est proposé parmi les situationnels).
+  if (m.heal >= 0.5 && ownedLegendaries.length < 2) {
     const ah = ANTI_HEAL[build.archetype]
     const comp = gd.itemsByName.get(norm(ah.component))
     const alreadyCovered = ownedItems.some((i) => i.grievous)
@@ -346,7 +352,7 @@ export function buildItemPlan(
   }
   steps.push(...coreSteps.slice(1))
 
-  // Situationnels : on complète jusqu'à 6 légendaires en tenant compte de l'inventaire.
+  // Situationnels : on complète jusqu'à 5 légendaires en tenant compte de l'inventaire.
   const legendaryInPlan = (): ItemInfo[] =>
     steps.filter((s) => s.item.isLegendary).map((s) => s.item)
   const situational: BuildStep[] = []
@@ -356,9 +362,42 @@ export function buildItemPlan(
     if (taken.some((t) => conflicts(t, s.item))) continue
     if (ownedLegendaries.some((o) => conflicts(o, s.item) && o.id !== s.item.id)) continue
     const step: BuildStep = { item: s.item, kind: 'situational', owned: false, reason: s.reason }
-    if (taken.length < 6) situational.push(step)
+    if (taken.length < MAX_LEGENDARIES) situational.push(step)
     else if (alternatives.length < 4) alternatives.push(step)
   }
+
+  // Beaucoup de soins adverses et aucun anti-soins prévu : l'objet anti-soins complet est imposé.
+  const finalAntiHeal = gd.itemsByName.get(norm(ANTI_HEAL[build.archetype].final))
+  const plannedLegendaries = (): ItemInfo[] => [
+    ...legendaryInPlan(),
+    ...situational.map((x) => x.item)
+  ]
+  if (
+    m.heal >= 0.55 &&
+    finalAntiHeal &&
+    !ownedItems.some((i) => i.grievous) &&
+    !plannedLegendaries().some((i) => i.grievous) &&
+    !ownedLegendaries.some((o) => conflicts(o, finalAntiHeal)) &&
+    !legendaryInPlan().some((i) => conflicts(i, finalAntiHeal))
+  ) {
+    for (let i = situational.length - 1; i >= 0; i--) {
+      if (conflicts(situational[i].item, finalAntiHeal))
+        alternatives.unshift(...situational.splice(i, 1))
+    }
+    if (plannedLegendaries().length >= MAX_LEGENDARIES) {
+      const idx = situational.map((x) => ownsId(x.item.id)).lastIndexOf(false)
+      if (idx >= 0) alternatives.unshift(...situational.splice(idx, 1))
+    }
+    if (plannedLegendaries().length < MAX_LEGENDARIES) {
+      situational.unshift({
+        item: finalAntiHeal,
+        kind: 'situational',
+        owned: false,
+        reason: 'anti-soins'
+      })
+    }
+  }
+  alternatives.splice(4)
   steps.push(...situational)
 
   // Objets légendaires achetés hors plan : ils prennent la place des derniers situationnels.
@@ -367,9 +406,11 @@ export function buildItemPlan(
     const conflictIdx = steps.findIndex(
       (s) => !s.owned && s.item.isLegendary && conflicts(s.item, extra)
     )
-    const lastSit = [...steps]
-      .reverse()
-      .findIndex((s) => s.kind === 'situational' && !ownsId(s.item.id))
+    // On remplace le dernier situationnel prévu, en gardant l'anti-soins si l'adversaire soigne.
+    const replaceable = (s: BuildStep, keepAntiHeal: boolean): boolean =>
+      s.kind === 'situational' && !ownsId(s.item.id) && !(keepAntiHeal && s.item.grievous)
+    let lastSit = [...steps].reverse().findIndex((s) => replaceable(s, m.heal >= 0.55))
+    if (lastSit < 0) lastSit = [...steps].reverse().findIndex((s) => replaceable(s, false))
     const idx = conflictIdx >= 0 ? conflictIdx : lastSit >= 0 ? steps.length - 1 - lastSit : -1
     const owned: BuildStep = { item: extra, kind: 'owned', owned: true, reason: 'acheté' }
     if (idx >= 0) steps.splice(idx, 1, owned)
@@ -386,6 +427,10 @@ export function buildItemPlan(
     if (s.kind === 'antiheal' && ownedItems.some((i) => i.grievous || i.from.includes(s.item.id)))
       s.owned = true
 
+  // Affichage : ce qui est déjà acheté d'abord, puis la suite dans l'ordre conseillé.
+  const ordered = [...steps.filter((s) => s.owned), ...steps.filter((s) => !s.owned)]
+  steps.splice(0, steps.length, ...ordered)
+
   // Prochain achat.
   let next: NextBuy | null = null
   const pending = steps.find((s) => !s.owned)
@@ -400,6 +445,20 @@ export function buildItemPlan(
       component: affordable
         ? null
         : bestComponent(gd, pending.item, currentGold, new Map(inventory))
+    }
+    // Inventaire plein (6 emplacements hors balise) et aucun composant à compléter : il faut vendre.
+    const slotsUsed = (me.items ?? []).filter((it) => it.slot < 6).length
+    if (slotsUsed >= 6 && remaining === pending.item.total) {
+      const sellable = ownedItems
+        .filter((i) => !i.isLegendary && !i.isBoots)
+        .sort((a, b) => {
+          const petA = a.tags.includes('Jungle') ? 0 : 1
+          const petB = b.tags.includes('Jungle') ? 0 : 1
+          return petA - petB || a.total - b.total
+        })[0]
+      next.sellHint = sellable
+        ? `Inventaire plein : vends ${sellable.nameFr}`
+        : 'Inventaire plein : vends un objet pour faire de la place'
     }
   } else if (pending) {
     next = { item: pending.item, remaining: pending.item.total, affordable: false, component: null }

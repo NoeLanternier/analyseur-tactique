@@ -163,6 +163,11 @@ export function BuildTab({ t }: { t: TactiqueState }): ReactElement | null {
             </div>
             {plan.next.component && <ItemIcon item={plan.next.component} version={v} size={28} />}
           </div>
+          {plan.next.sellHint && (
+            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-orange-300">
+              <TriangleAlert size={12} className="shrink-0" /> {plan.next.sellHint}
+            </p>
+          )}
         </Card>
       )}
 
