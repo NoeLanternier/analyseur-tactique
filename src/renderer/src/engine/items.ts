@@ -215,6 +215,28 @@ function chooseBoots(
   return { item: defaultBoots }
 }
 
+/** L'objet se construit-il (directement ou non) à partir de ce composant ? */
+function buildsFrom(gd: GameData, item: ItemInfo, componentId: number, depth = 0): boolean {
+  if (depth > 4) return false
+  return item.from.some((id) => {
+    if (id === componentId) return true
+    const sub = gd.items.get(id)
+    return sub ? buildsFrom(gd, sub, componentId, depth + 1) : false
+  })
+}
+
+/** Composant anti-soins (Blessures graves) dans la recette d'un objet. */
+function antiHealComponentOf(gd: GameData, item: ItemInfo): ItemInfo | undefined {
+  const queue = [...item.from]
+  while (queue.length) {
+    const comp = gd.items.get(queue.shift()!)
+    if (!comp) continue
+    if (comp.grievous && !comp.isLegendary) return comp
+    queue.push(...comp.from)
+  }
+  return undefined
+}
+
 /** Valeur de composants déjà possédés pour un objet (consomme l'inventaire). */
 function ownedComponentValue(gd: GameData, item: ItemInfo, inventory: Map<number, number>): number {
   let value = 0
@@ -299,8 +321,27 @@ export function buildItemPlan(
   }
   for (const c of core) pool.delete(c.id)
 
+  // Composants importants déjà achetés : on privilégie les objets qui les terminent (l'or investi
+  // n'est pas perdu et le plan ne change pas de direction en cours de partie).
+  const startedComponents = ownedItems.filter(
+    (i) =>
+      !i.isLegendary &&
+      !i.isBoots &&
+      i.total >= 700 &&
+      !i.tags.includes('Consumable') &&
+      !i.tags.includes('Jungle') &&
+      !i.tags.includes('Trinket')
+  )
   const scored = [...pool.values()]
-    .map((it) => scoreItem(it, threat, optionNames.indexOf(norm(it.name)), build.situational))
+    .map((it) => {
+      const sc = scoreItem(it, threat, optionNames.indexOf(norm(it.name)), build.situational)
+      const started = startedComponents.find((c) => buildsFrom(gd, it, c.id))
+      if (started) {
+        sc.score += 0.5
+        sc.reason = `termine ${started.nameFr}`
+      }
+      return sc
+    })
     .sort((a, b) => b.score - a.score)
 
   // Cœur, avec remplacement du 3e objet si la partie l'exige vraiment.
@@ -341,15 +382,6 @@ export function buildItemPlan(
   else if (boots.item)
     steps.push({ item: boots.item, kind: 'boots', owned: false, reason: boots.reason })
 
-  // Composant anti-soins tôt si nécessaire (seulement en début de build : plus tard, c'est l'objet
-  // anti-soins complet qui est proposé parmi les situationnels).
-  if (m.heal >= 0.5 && ownedLegendaries.length < 2) {
-    const ah = ANTI_HEAL[build.archetype]
-    const comp = gd.itemsByName.get(norm(ah.component))
-    const alreadyCovered = ownedItems.some((i) => i.grievous)
-    if (comp && !alreadyCovered)
-      steps.push({ item: comp, kind: 'antiheal', owned: false, reason: 'anti-soins tôt' })
-  }
   steps.push(...coreSteps.slice(1))
 
   // Situationnels : on complète jusqu'à 5 légendaires en tenant compte de l'inventaire.
@@ -366,34 +398,80 @@ export function buildItemPlan(
     else if (alternatives.length < 4) alternatives.push(step)
   }
 
-  // Beaucoup de soins adverses et aucun anti-soins prévu : l'objet anti-soins complet est imposé.
-  const finalAntiHeal = gd.itemsByName.get(norm(ANTI_HEAL[build.archetype].final))
+  // Anti-soins : un seul objet complet, cohérent avec ce qui a déjà été acheté.
+  // - un composant anti-soins est déjà dans l'inventaire → on termine l'objet qu'il construit ;
+  // - sinon, beaucoup de soins adverses et rien de prévu → l'objet anti-soins de l'archétype.
   const plannedLegendaries = (): ItemInfo[] => [
     ...legendaryInPlan(),
     ...situational.map((x) => x.item)
   ]
-  if (
+  const ownsGrievousLegendary = ownedLegendaries.some((i) => i.grievous)
+  const ownedGrievousComp = ownedItems.find((i) => i.grievous && !i.isLegendary)
+  let antiHealTarget: ItemInfo | undefined
+  let antiHealReason = 'anti-soins'
+  if (!ownsGrievousLegendary && ownedGrievousComp) {
+    const completions = [...gd.items.values()].filter(
+      (i) =>
+        i.isLegendary &&
+        i.grievous &&
+        gd.itemsByName.get(norm(i.name)) === i &&
+        buildsFrom(gd, i, ownedGrievousComp.id)
+    )
+    antiHealTarget =
+      completions.find((i) => plannedLegendaries().some((p) => p.id === i.id)) ??
+      completions.find((i) => norm(i.name) === norm(ANTI_HEAL[build.archetype].final)) ??
+      completions[0]
+    antiHealReason = `termine ${ownedGrievousComp.nameFr}`
+  } else if (
+    !ownsGrievousLegendary &&
     m.heal >= 0.55 &&
-    finalAntiHeal &&
-    !ownedItems.some((i) => i.grievous) &&
-    !plannedLegendaries().some((i) => i.grievous) &&
-    !ownedLegendaries.some((o) => conflicts(o, finalAntiHeal)) &&
-    !legendaryInPlan().some((i) => conflicts(i, finalAntiHeal))
+    !plannedLegendaries().some((i) => i.grievous)
   ) {
+    antiHealTarget = gd.itemsByName.get(norm(ANTI_HEAL[build.archetype].final))
+  }
+  if (
+    antiHealTarget &&
+    !ownedLegendaries.some((o) => conflicts(o, antiHealTarget!)) &&
+    !legendaryInPlan().some((i) => conflicts(i, antiHealTarget!))
+  ) {
+    const target = antiHealTarget
+    // Un seul anti-soins : les autres objets anti-soins prévus passent en alternatives.
     for (let i = situational.length - 1; i >= 0; i--) {
-      if (conflicts(situational[i].item, finalAntiHeal))
+      if (
+        situational[i].item.id !== target.id &&
+        (situational[i].item.grievous || conflicts(situational[i].item, target))
+      )
         alternatives.unshift(...situational.splice(i, 1))
     }
+    const existing = situational.findIndex((x) => x.item.id === target.id)
+    if (existing >= 0) situational.splice(existing, 1)
     if (plannedLegendaries().length >= MAX_LEGENDARIES) {
       const idx = situational.map((x) => ownsId(x.item.id)).lastIndexOf(false)
       if (idx >= 0) alternatives.unshift(...situational.splice(idx, 1))
     }
     if (plannedLegendaries().length < MAX_LEGENDARIES) {
       situational.unshift({
-        item: finalAntiHeal,
+        item: target,
         kind: 'situational',
         owned: false,
-        reason: 'anti-soins'
+        reason: antiHealReason
+      })
+    }
+  }
+
+  // Composant anti-soins tôt (avant le 2e objet légendaire) : toujours celui de l'objet anti-soins
+  // prévu, pour que l'or investi serve plus tard.
+  if (m.heal >= 0.5 && ownedLegendaries.length < 2 && !ownedItems.some((i) => i.grievous)) {
+    const plannedAntiHeal = [...plannedLegendaries()].find((i) => i.grievous)
+    const comp = plannedAntiHeal ? antiHealComponentOf(gd, plannedAntiHeal) : undefined
+    if (comp && plannedAntiHeal) {
+      const bootsIdx = steps.findIndex((x) => x.kind === 'boots')
+      const at = bootsIdx >= 0 ? bootsIdx + 1 : Math.min(steps.length, 2)
+      steps.splice(at, 0, {
+        item: comp,
+        kind: 'antiheal',
+        owned: false,
+        reason: `anti-soins tôt → ${plannedAntiHeal.nameFr}`
       })
     }
   }
