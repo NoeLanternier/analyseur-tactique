@@ -12,6 +12,7 @@ on:
       - 'package-lock.json'
       - 'electron-builder.yml'
       - 'electron.vite.config.ts'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 
 permissions:
@@ -40,6 +41,14 @@ jobs:
       - name: Numéro de version
         shell: bash
         run: npm version "2.1.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+
+      # GitHub refuse de publier une version sans étiquette (tag) existante : on la crée d'abord.
+      - name: Étiquette de version
+        shell: bash
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          git tag -f "$VERSION"
+          git push -f origin "$VERSION"
 
       - name: Vérification des types
         run: npm run typecheck
