@@ -1,0 +1,53 @@
+# Construit l'app Windows et la publie dans les « Releases » GitHub à chaque modification du code.
+# L'app installée la télécharge et l'installe toute seule (voir src/main/updater.ts).
+name: Publier une version de l'app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'resources/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'electron-builder.yml'
+      - 'electron.vite.config.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installation des dépendances
+        run: npm ci
+
+      # Numéro de version automatique : 2.1.<numéro d'exécution>, toujours croissant.
+      - name: Numéro de version
+        shell: bash
+        run: npm version "2.1.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+
+      - name: Vérification des types
+        run: npm run typecheck
+
+      - name: Compilation
+        run: npx electron-vite build
+
+      - name: Programme d'installation et publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --publish always

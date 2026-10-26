@@ -1,0 +1,326 @@
+import {
+  JUNGLE_BUILDS,
+  META_PATCH,
+  type JunglerBuild,
+  type RuneSpec,
+  type SituationContext
+} from '../data/junglers'
+import type { Archetype } from '../data/items'
+import type { ChampInfo, GameData } from './gameData'
+import { norm } from './normalize'
+import { resolveSpec } from './runes'
+import { profileOf, type MeasuredProfiles } from './threat'
+
+// Catalogue des builds : base tactique + mise à jour distante éventuelle + build générique pour
+// tout champion absent de la base (nouveau champion, pick original...).
+
+/** Statistiques d'un jungler sur le patch (méta distante). vs : [parties, taux de victoire]. */
+export interface JunglerStat {
+  games: number
+  winRate: number
+  vs: Record<string, [number, number]>
+}
+
+export interface Catalog {
+  patch: string
+  builds: Map<string, JunglerBuild>
+  /** Source de la base : intégrée ou URL distante. */
+  origin: 'intégrée' | 'distante'
+  /** Profils mesurés de tous les champions (méta distante). */
+  profiles?: MeasuredProfiles
+  /** Taux de victoire des junglers et de leurs affrontements (méta distante). */
+  junglerStats?: Record<string, JunglerStat>
+}
+
+export function defaultCatalog(): Catalog {
+  return {
+    patch: META_PATCH,
+    builds: new Map(JUNGLE_BUILDS.map((b) => [b.id, b])),
+    origin: 'intégrée'
+  }
+}
+
+const ARCHETYPES: Archetype[] = [
+  'AD_FIGHTER',
+  'AD_ASSASSIN',
+  'AD_CARRY',
+  'AP_FIGHTER',
+  'AP_BURST',
+  'TANK',
+  'ENCHANTER'
+]
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function isBuild(x: any): x is JunglerBuild {
+  return (
+    x &&
+    typeof x.id === 'string' &&
+    ARCHETYPES.includes(x.archetype) &&
+    typeof x.pet === 'string' &&
+    typeof x.boots === 'string' &&
+    Array.isArray(x.core) &&
+    x.core.length === 3 &&
+    Array.isArray(x.options) &&
+    x.runes &&
+    typeof x.runes.keystone === 'string' &&
+    Array.isArray(x.runes.primary) &&
+    x.runes.primary.length === 3 &&
+    Array.isArray(x.runes.secondary) &&
+    x.runes.secondary.length === 2 &&
+    Array.isArray(x.runes.shards) &&
+    x.runes.shards.length === 3
+  )
+}
+
+/**
+ * Fusionne un JSON distant { patch: "16.22", builds: [...] } (ou directement un tableau) avec la
+ * base intégrée. Les entrées invalides sont ignorées.
+ */
+export function mergeOverride(
+  base: Catalog,
+  data: unknown
+): {
+  catalog: Catalog
+  accepted: number
+  rejected: number
+  generatedAt: string | null
+  sampleGames: number | null
+} {
+  const raw: any = data
+  const list: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.builds) ? raw.builds : []
+  const builds = new Map(base.builds)
+  const patch = typeof raw?.patch === 'string' ? raw.patch : base.patch
+  let accepted = 0
+  let rejected = 0
+  for (const b of list) {
+    if (isBuild(b)) {
+      builds.set(b.id, {
+        ...b,
+        skills: typeof b.skills === 'string' ? b.skills : '',
+        patch: typeof b.patch === 'string' ? b.patch : patch,
+        games: typeof b.games === 'number' ? b.games : undefined,
+        winRate: typeof b.winRate === 'number' ? b.winRate : undefined,
+        situational: parseSituational(b.situational)
+      })
+      accepted++
+    } else rejected++
+  }
+  const generatedAt = typeof raw?.generatedAt === 'string' ? raw.generatedAt : null
+  const sampleGames = typeof raw?.sampleGames === 'number' ? raw.sampleGames : null
+  return {
+    catalog: {
+      patch,
+      builds,
+      origin: accepted > 0 ? 'distante' : base.origin,
+      profiles: parseProfiles(raw?.profiles) ?? base.profiles,
+      junglerStats: parseJunglerStats(raw?.junglers) ?? base.junglerStats
+    },
+    accepted,
+    rejected,
+    generatedAt,
+    sampleGames
+  }
+}
+
+const num = (x: any): number | null => (typeof x === 'number' && Number.isFinite(x) ? x : null)
+
+const CONTEXT_KEYS: SituationContext[] = ['all', 'ap', 'ad', 'heal', 'tank', 'cc']
+
+function parseSituational(raw: any): JunglerBuild['situational'] {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: NonNullable<JunglerBuild['situational']> = {}
+  for (const ctx of CONTEXT_KEYS) {
+    const c = raw[ctx]
+    if (!c || !Array.isArray(c.items) || num(c.games) === null) continue
+    const items = c.items
+      .filter(
+        (x: any) => typeof x?.item === 'string' && num(x.share) !== null && num(x.lift) !== null
+      )
+      .map((x: any) => ({ item: x.item, share: x.share, lift: x.lift, games: num(x.games) ?? 0 }))
+    if (items.length) out[ctx] = { games: c.games, items }
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+function parseProfiles(raw: any): MeasuredProfiles | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: MeasuredProfiles = {}
+  for (const [id, p] of Object.entries<any>(raw)) {
+    const keys = ['ap', 'tank', 'cc', 'heal', 'shield', 'crit', 'aa', 'games'] as const
+    if (keys.every((k) => num(p?.[k]) !== null)) {
+      out[id] = {
+        ap: p.ap,
+        tank: p.tank,
+        cc: p.cc,
+        heal: p.heal,
+        shield: p.shield,
+        crit: p.crit,
+        aa: p.aa,
+        games: p.games
+      }
+    }
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+function parseJunglerStats(raw: any): Record<string, JunglerStat> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: Record<string, JunglerStat> = {}
+  for (const [id, j] of Object.entries<any>(raw)) {
+    if (num(j?.games) === null || num(j?.winRate) === null) continue
+    const vs: Record<string, [number, number]> = {}
+    for (const [enemy, v] of Object.entries<any>(j.vs ?? {})) {
+      if (Array.isArray(v) && num(v[0]) !== null && num(v[1]) !== null) vs[enemy] = [v[0], v[1]]
+    }
+    out[id] = { games: j.games, winRate: j.winRate, vs }
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+const GENERIC_RUNES: Record<Archetype, RuneSpec> = {
+  AD_FIGHTER: {
+    keystone: 'Conqueror',
+    primary: ['Triumph', 'Legend: Alacrity', 'Last Stand'],
+    secondaryTree: 'Inspiration',
+    secondary: ['Magical Footwear', 'Cosmic Insight'],
+    shards: ['AS', 'AF', 'HS']
+  },
+  AD_ASSASSIN: {
+    keystone: 'Electrocute',
+    primary: ['Sudden Impact', 'Grisly Mementos', 'Treasure Hunter'],
+    secondaryTree: 'Precision',
+    secondary: ['Triumph', 'Coup de Grace'],
+    shards: ['AF', 'AF', 'HS']
+  },
+  AD_CARRY: {
+    keystone: 'Lethal Tempo',
+    primary: ['Triumph', 'Legend: Alacrity', 'Coup de Grace'],
+    secondaryTree: 'Domination',
+    secondary: ['Sudden Impact', 'Treasure Hunter'],
+    shards: ['AS', 'AF', 'HS']
+  },
+  AP_FIGHTER: {
+    keystone: 'Conqueror',
+    primary: ['Triumph', 'Legend: Haste', 'Last Stand'],
+    secondaryTree: 'Inspiration',
+    secondary: ['Magical Footwear', 'Cosmic Insight'],
+    shards: ['AF', 'AF', 'HS']
+  },
+  AP_BURST: {
+    keystone: 'Dark Harvest',
+    primary: ['Sudden Impact', 'Grisly Mementos', 'Treasure Hunter'],
+    secondaryTree: 'Sorcery',
+    secondary: ['Transcendence', 'Waterwalking'],
+    shards: ['AF', 'AF', 'HS']
+  },
+  TANK: {
+    keystone: 'Aftershock',
+    primary: ['Font of Life', 'Conditioning', 'Overgrowth'],
+    secondaryTree: 'Precision',
+    secondary: ['Triumph', 'Legend: Alacrity'],
+    shards: ['AS', 'HS', 'HS']
+  },
+  ENCHANTER: {
+    keystone: 'Summon Aery',
+    primary: ['Nimbus Cloak', 'Transcendence', 'Waterwalking'],
+    secondaryTree: 'Inspiration',
+    secondary: ['Cash Back', 'Cosmic Insight'],
+    shards: ['AH', 'MS', 'HS']
+  }
+}
+
+const GENERIC_ITEMS: Record<Archetype, Pick<JunglerBuild, 'pet' | 'boots' | 'core' | 'options'>> = {
+  AD_FIGHTER: {
+    pet: 'Scorchclaw Pup',
+    boots: 'Plated Steelcaps',
+    core: ['Eclipse', 'Black Cleaver', "Death's Dance"],
+    options: ["Sterak's Gage", 'Guardian Angel', 'Maw of Malmortius', 'Spirit Visage']
+  },
+  AD_ASSASSIN: {
+    pet: 'Gustwalker Hatchling',
+    boots: 'Ionian Boots of Lucidity',
+    core: ['Voltaic Cyclosword', 'Bastionbreaker', 'Edge of Night'],
+    options: ["Serylda's Grudge", "Serpent's Fang", 'Guardian Angel']
+  },
+  AD_CARRY: {
+    pet: 'Gustwalker Hatchling',
+    boots: "Berserker's Greaves",
+    core: ['Kraken Slayer', 'The Collector', "Lord Dominik's Regards"],
+    options: ['Infinity Edge', 'Guardian Angel', "Death's Dance"]
+  },
+  AP_FIGHTER: {
+    pet: 'Gustwalker Hatchling',
+    boots: "Sorcerer's Shoes",
+    core: ['Riftmaker', "Liandry's Torment", "Zhonya's Hourglass"],
+    options: ["Rabadon's Deathcap", 'Void Staff', 'Spirit Visage']
+  },
+  AP_BURST: {
+    pet: 'Scorchclaw Pup',
+    boots: "Sorcerer's Shoes",
+    core: ['Lich Bane', 'Shadowflame', "Zhonya's Hourglass"],
+    options: ["Rabadon's Deathcap", 'Void Staff', "Banshee's Veil"]
+  },
+  TANK: {
+    pet: 'Mosstomper Seedling',
+    boots: 'Plated Steelcaps',
+    core: ['Heartsteel', 'Sunfire Aegis', "Jak'Sho, The Protean"],
+    options: ['Thornmail', 'Force of Nature', "Randuin's Omen", 'Spirit Visage']
+  },
+  ENCHANTER: {
+    pet: 'Gustwalker Hatchling',
+    boots: 'Ionian Boots of Lucidity',
+    core: ['Redemption', 'Moonstone Renewer', 'Ardent Censer'],
+    options: ["Shurelya's Battlesong", 'Dawncore']
+  }
+}
+
+export function guessArchetype(champ: ChampInfo, measured?: MeasuredProfiles): Archetype {
+  const p = profileOf(champ, measured)
+  const f = p.flags
+  if (f.includes('E') && p.tank < 0.7 && p.ap >= 0.5) return 'ENCHANTER'
+  if (p.tank >= 0.8 || (!p.measured && f.includes('T'))) return 'TANK'
+  if (p.ap >= 0.6) return f.includes('B') || p.tank >= 0.5 ? 'AP_FIGHTER' : 'AP_BURST'
+  if (f.includes('A')) return 'AD_ASSASSIN'
+  if (f.includes('M') || p.crit >= 0.5) return 'AD_CARRY'
+  return 'AD_FIGHTER'
+}
+
+export function getBuild(
+  catalog: Catalog,
+  champ: ChampInfo
+): { build: JunglerBuild; generic: boolean } {
+  const known = catalog.builds.get(champ.id)
+  if (known) return { build: known, generic: false }
+  const archetype = guessArchetype(champ, catalog.profiles)
+  return {
+    build: {
+      id: champ.id,
+      archetype,
+      skills: '',
+      runes: GENERIC_RUNES[archetype],
+      ...GENERIC_ITEMS[archetype]
+    },
+    generic: true
+  }
+}
+
+export interface ValidationReport {
+  checkedBuilds: number
+  issues: string[]
+}
+
+/** Vérifie chaque build contre les données Riot du patch en cours. */
+export function validateCatalog(gd: GameData, catalog: Catalog): ValidationReport {
+  const issues: string[] = []
+  for (const b of catalog.builds.values()) {
+    if (!gd.championsById.has(b.id)) issues.push(`${b.id} : champion inconnu`)
+    const runes = resolveSpec(gd, b.runes)
+    if (!runes) issues.push(`${b.id} : page de runes invalide (${b.runes.keystone})`)
+    else if (runes.repairs.length)
+      issues.push(`${b.id} : runes corrigées (${runes.repairs.join(', ')})`)
+    for (const name of [b.pet, b.boots, ...b.core, ...b.options]) {
+      if (!gd.itemsByName.has(norm(name))) issues.push(`${b.id} : objet introuvable « ${name} »`)
+    }
+  }
+  return { checkedBuilds: catalog.builds.size, issues }
+}

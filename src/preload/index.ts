@@ -1,0 +1,34 @@
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import type { TactiqueApi } from '../shared/types'
+
+// Chaque abonnement renvoie une fonction de désinscription (évite les écouteurs en double).
+function listen<T>(channel: string, cb: (value: T) => void): () => void {
+  const handler = (_event: IpcRendererEvent, value: T): void => cb(value)
+  ipcRenderer.on(channel, handler)
+  return () => ipcRenderer.removeListener(channel, handler)
+}
+
+const api: TactiqueApi = {
+  onDraftUpdate: (cb) => listen('lcu-draft-update', cb),
+  onPhaseUpdate: (cb) => listen('lcu-phase-update', cb),
+  onLcuStatus: (cb) => listen('lcu-status', cb),
+  onLiveUpdate: (cb) => listen('live-update', cb),
+  onTogglePin: (cb) => listen('toggle-pin', () => cb()),
+  getInitialState: () => ipcRenderer.invoke('get-initial-state'),
+  applyRunes: (payload) => ipcRenderer.invoke('apply-runes', payload),
+  applyItemSet: (payload) => ipcRenderer.invoke('apply-item-set', payload),
+  getRecommendedRunes: (championId, position) =>
+    ipcRenderer.invoke('get-recommended-runes', championId, position),
+  getChampionPool: () => ipcRenderer.invoke('get-champion-pool'),
+  getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  onUpdateStatus: (cb) => listen('update-status', cb),
+  checkForUpdates: () => ipcRenderer.send('check-for-updates'),
+  installUpdate: () => ipcRenderer.send('install-update'),
+  getSettings: () => ipcRenderer.invoke('get-settings'),
+  saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
+  fetchMetaOverride: (url) => ipcRenderer.invoke('fetch-meta-override', url),
+  setOverlayMode: (expanded) => ipcRenderer.send('set-overlay-mode', expanded),
+  closeApp: () => ipcRenderer.send('close-app')
+}
+
+contextBridge.exposeInMainWorld('api', api)

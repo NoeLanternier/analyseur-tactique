@@ -1,0 +1,187 @@
+import { app, shell, BrowserWindow, ipcMain, globalShortcut, screen, net } from 'electron'
+import { join } from 'path'
+import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+import { LcuService } from './lcu'
+import { LivePoller } from './live'
+import { loadSettings, saveSettings } from './settings'
+import { setDebug } from './logger'
+import { checkForUpdates, getUpdateStatus, initUpdater, installUpdate } from './updater'
+import type { ItemSetPayload, RunePagePayload, Settings } from '../shared/types'
+
+// Plus de "ignore-certificate-errors" : l'API en jeu est vérifiée avec le certificat Riot (live.ts).
+
+const WIDTH = 380
+const TOGGLE_SHORTCUT = 'CommandOrControl+Shift+T'
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+  process.exit(0)
+}
+
+let mainWindow: BrowserWindow | null = null
+let settings: Settings = loadSettings()
+setDebug(settings.debug)
+
+/** Lancement au démarrage de Windows (uniquement pour l'app installée ou l'exe). */
+function applyLoginItem(enabled: boolean): void {
+  if (!app.isPackaged) return
+  const exe = process.env['PORTABLE_EXECUTABLE_FILE'] || process.execPath
+  app.setLoginItemSettings({ openAtLogin: enabled, path: exe })
+}
+
+const lcu = new LcuService()
+const live = new LivePoller(() => ['GameStart', 'InProgress', 'Reconnect'].includes(lcu.phase))
+
+function windowBounds(side: 'left' | 'right'): Electron.Rectangle {
+  const area = screen.getPrimaryDisplay().workArea
+  const height = Math.min(780, area.height - 40)
+  return {
+    width: WIDTH,
+    height,
+    x: side === 'left' ? area.x : area.x + area.width - WIDTH,
+    y: area.y + Math.round((area.height - height) / 2)
+  }
+}
+
+function send(channel: string, ...args: unknown[]): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...args)
+}
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    ...windowBounds(settings.side),
+    show: false,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: true,
+      contextIsolation: true,
+      backgroundThrottling: false
+    }
+  })
+
+  // Niveau le plus haut pour rester visible au-dessus du jeu en mode "Sans bordures".
+  mainWindow.setAlwaysOnTop(true, 'screen-saver')
+  mainWindow.setVisibleOnAllWorkspaces(true)
+  mainWindow.setIgnoreMouseEvents(true, { forward: true })
+
+  mainWindow.on('ready-to-show', () => mainWindow?.showInactive())
+  mainWindow.on('closed', () => (mainWindow = null))
+
+  mainWindow.webContents.setWindowOpenHandler((details) => {
+    if (details.url.startsWith('https://')) void shell.openExternal(details.url)
+    return { action: 'deny' }
+  })
+
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  } else {
+    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+  }
+}
+
+function registerIpc(): void {
+  ipcMain.handle('get-initial-state', () => ({
+    status: lcu.status,
+    phase: lcu.phase,
+    draft: lcu.draft
+  }))
+
+  ipcMain.handle('apply-runes', (_e, payload: RunePagePayload) =>
+    lcu.applyRunePage(payload, settings.replaceActivePageIfFull)
+  )
+
+  ipcMain.handle('apply-item-set', (_e, payload: ItemSetPayload) => lcu.applyItemSet(payload))
+
+  ipcMain.handle('get-recommended-runes', (_e, championId: number, position: string) =>
+    lcu.getRecommendedRunes(championId, position)
+  )
+
+  ipcMain.handle('get-champion-pool', () => lcu.getChampionPool())
+
+  ipcMain.handle('get-app-info', () => ({ version: app.getVersion(), update: getUpdateStatus() }))
+  ipcMain.on('check-for-updates', () => checkForUpdates())
+  ipcMain.on('install-update', () => installUpdate())
+
+  ipcMain.handle('get-settings', () => settings)
+
+  ipcMain.handle('save-settings', (_e, next: Settings) => {
+    const previousSide = settings.side
+    const previousStartup = settings.launchAtStartup
+    settings = saveSettings(next)
+    setDebug(settings.debug)
+    if (settings.launchAtStartup !== previousStartup) applyLoginItem(settings.launchAtStartup)
+
+    /** Lancement au démarrage de Windows (uniquement pour l'app installée ou l'exe). */
+    function applyLoginItem(enabled: boolean): void {
+      if (!app.isPackaged) return
+      const exe = process.env['PORTABLE_EXECUTABLE_FILE'] || process.execPath
+      app.setLoginItemSettings({ openAtLogin: enabled, path: exe })
+    }
+    if (mainWindow && settings.side !== previousSide)
+      mainWindow.setBounds(windowBounds(settings.side))
+    return settings
+  })
+
+  ipcMain.handle('fetch-meta-override', async (_e, url: string) => {
+    if (!/^https:\/\//i.test(url)) return { ok: false, error: 'URL https:// requise' }
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 8000)
+    try {
+      const res = await net.fetch(url, { signal: controller.signal })
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+      return { ok: true, data: await res.json() }
+    } catch (error) {
+      return { ok: false, error: String((error as Error)?.message ?? error) }
+    } finally {
+      clearTimeout(timeout)
+    }
+  })
+
+  ipcMain.on('set-overlay-mode', (event, expanded: boolean) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return
+    if (expanded) win.setIgnoreMouseEvents(false)
+    else win.setIgnoreMouseEvents(true, { forward: true })
+  })
+
+  ipcMain.on('close-app', () => app.quit())
+}
+
+app.whenReady().then(() => {
+  electronApp.setAppUserModelId('com.tactique.app')
+  app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
+
+  registerIpc()
+  createWindow()
+
+  lcu.on('status', (s) => send('lcu-status', s))
+  lcu.on('phase', (p) => send('lcu-phase-update', p))
+  lcu.on('draft', (d) => send('lcu-draft-update', d))
+  live.on('update', (d) => send('live-update', d))
+  lcu.start()
+  live.start()
+  applyLoginItem(settings.launchAtStartup)
+  initUpdater((s) => send('update-status', s))
+
+  // Raccourci global : épingler / masquer le panneau sans passer la souris dessus.
+  globalShortcut.register(TOGGLE_SHORTCUT, () => send('toggle-pin'))
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
+  lcu.stop()
+  live.stop()
+})
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit()
+})
