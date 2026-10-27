@@ -8,7 +8,8 @@ import { setDebug } from './logger'
 import { checkForUpdates, getUpdateStatus, initUpdater, installUpdate } from './updater'
 import { listReports, reportsDir, saveReport } from './reports'
 import * as fs from 'fs'
-import type { ItemSetPayload, RunePagePayload, Settings } from '../shared/types'
+import { JournalRecorder } from './journal'
+import type { ItemSetPayload, RawPostGame, RunePagePayload, Settings } from '../shared/types'
 
 // Plus de "ignore-certificate-errors" : l'API en jeu est vérifiée avec le certificat Riot (live.ts).
 
@@ -32,6 +33,7 @@ function applyLoginItem(enabled: boolean): void {
 }
 
 const lcu = new LcuService()
+let journal: JournalRecorder
 const live = new LivePoller(() => ['GameStart', 'InProgress', 'Reconnect'].includes(lcu.phase))
 
 function windowBounds(side: 'left' | 'right'): Electron.Rectangle {
@@ -138,11 +140,17 @@ function registerIpc(): void {
   })
 
   // Après-partie.
-  ipcMain.handle('wait-finished-game', (_e, sinceMs: number) =>
-    lcu.waitForFinishedGame(Number(sinceMs) || 0)
+  // Le journal enregistré pendant la partie est joint : le renderer le rattache si les champions
+  // correspondent à la partie récupérée.
+  const withJournal = (raw: RawPostGame | null): RawPostGame | null =>
+    raw ? { ...raw, journal: journal.latest() } : null
+  ipcMain.handle('wait-finished-game', async (_e, sinceMs: number) =>
+    withJournal(await lcu.waitForFinishedGame(Number(sinceMs) || 0))
   )
   ipcMain.handle('get-recent-games', (_e, count: number) => lcu.getRecentGames(Number(count) || 20))
-  ipcMain.handle('get-game-details', (_e, gameId: number) => lcu.getGameDetails(Number(gameId)))
+  ipcMain.handle('get-game-details', async (_e, gameId: number) =>
+    withJournal(await lcu.getGameDetails(Number(gameId)))
+  )
   ipcMain.handle('list-reports', () => listReports())
   ipcMain.handle('save-report', (_e, gameId: number, facts: unknown) =>
     saveReport(Number(gameId), facts)
@@ -167,13 +175,17 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.tactique.app')
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
+  journal = new JournalRecorder()
   registerIpc()
   createWindow()
 
   lcu.on('status', (s) => send('lcu-status', s))
   lcu.on('phase', (p) => send('lcu-phase-update', p))
   lcu.on('draft', (d) => send('lcu-draft-update', d))
-  live.on('update', (d) => send('live-update', d))
+  live.on('update', (d) => {
+    journal.update(d)
+    send('live-update', d)
+  })
   lcu.start()
   live.start()
   applyLoginItem(settings.launchAtStartup)

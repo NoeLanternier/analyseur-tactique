@@ -184,12 +184,33 @@ export interface RecentGame {
 }
 
 /** Données brutes d'après-partie lues dans le client (format de l'historique Riot). */
+/**
+ * Journal enregistré pendant la partie à partir de l'API en jeu (toutes les 2 s) : l'historique du
+ * client ne contient pas les achats d'objets, ce journal permet d'en connaître le minutage exact.
+ */
+export interface GameJournal {
+  /** Heure (ms) correspondant au début de la partie. */
+  startedAt: number
+  /** Temps de jeu (s) du premier relevé : au-delà de ~2 min, l'app a été ouverte en cours de partie. */
+  from: number
+  lastTime: number
+  /** Indice du joueur local dans players (-1 si inconnu). */
+  me: number
+  players: { champ: string; raw: string; team: string }[]
+  /** [seconde, indice du joueur, objet, op] : 1 = apparu dans l'inventaire, 0 = disparu. */
+  items: [number, number, number, number][]
+  /** [seconde, or en poche] du joueur local. */
+  gold: [number, number][]
+}
+
 export interface RawPostGame {
   gameId: number
   game: unknown
   timeline: unknown
   puuid: string
   summonerId: number
+  /** Dernier journal de partie enregistré (rattaché si les champions correspondent). */
+  journal?: GameJournal | null
 }
 
 export interface TactiqueApi {

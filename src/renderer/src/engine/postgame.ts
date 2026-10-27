@@ -1,4 +1,4 @@
-import type { LiveGameData, LivePlayer, RawPostGame } from '../../../shared/types'
+import type { GameJournal, LiveGameData, LivePlayer, RawPostGame } from '../../../shared/types'
 import { getBuild, type Benchmark, type Catalog } from './catalog'
 import type { ChampInfo, GameData, ItemInfo } from './gameData'
 import { buildItemPlan } from './items'
@@ -65,12 +65,27 @@ export interface GameFacts {
   kills: [number, number, number, number[]][]
   /** [seconde, tueur, équipe, type]. */
   monsters: [number, number, number, MonsterKind][]
+  /**
+   * Origine des achats : 'live' = journal enregistré par l'app pendant la partie (minutage exact),
+   * absent = inconnus (l'historique du client ne les contient pas).
+   */
+  itemSource?: 'live' | 'timeline'
+  /** [seconde, or en poche] du joueur local (journal de partie). */
+  gold?: [number, number][]
+  /** Nombre de balises de contrôle connu de façon fiable (journal de partie). */
+  controlWardsKnown?: boolean
 }
+
+/** Retrouve l'identifiant numérique d'un champion de l'API en jeu. */
+export type ChampResolver = (rawChampionName: string, championName: string) => number | undefined
 
 const num = (x: any): number => (typeof x === 'number' && Number.isFinite(x) ? x : Number(x) || 0)
 
 /** Convertit les données du client. Renvoie un motif si la partie n'est pas une partie jungle. */
-export function normalizeGame(raw: RawPostGame): GameFacts | { skip: string } {
+export function normalizeGame(
+  raw: RawPostGame,
+  resolveChamp?: ChampResolver
+): GameFacts | { skip: string } {
   const g: any = (raw.game as any)?.info ?? raw.game
   if (!g || !Array.isArray(g.participants)) return { skip: 'données illisibles' }
   const mapId = num(g.mapId)
@@ -227,7 +242,43 @@ export function normalizeGame(raw: RawPostGame): GameFacts | { skip: string } {
       }
     }
   }
+  if (facts.items.length) facts.itemSource = 'timeline'
+  if (raw.journal && resolveChamp) attachJournal(facts, raw.journal, resolveChamp)
   return facts
+}
+
+/**
+ * Rattache le journal enregistré pendant la partie (achats, balises, or en poche), si c'est bien
+ * la même partie : mêmes champions dans les mêmes équipes, enregistrée depuis le début.
+ */
+export function attachJournal(facts: GameFacts, j: GameJournal, resolve: ChampResolver): boolean {
+  if (!j || !Array.isArray(j.players) || !Array.isArray(j.items)) return false
+  if (j.from > 150 || j.lastTime < facts.duration * 0.8) return false
+  if (facts.createdAt && Math.abs(j.startedAt - facts.createdAt) > 30 * 60 * 1000) return false
+  const pidOf: number[] = []
+  const used = new Set<number>()
+  for (const p of j.players) {
+    const key = resolve(p.raw, p.champ)
+    const team = p.team === 'ORDER' ? 100 : p.team === 'CHAOS' ? 200 : 0
+    const match = facts.players.find(
+      (x) => x.champ === key && (!team || x.team === team) && !used.has(x.pid)
+    )
+    pidOf.push(match ? match.pid : 0)
+    if (match) used.add(match.pid)
+  }
+  if (used.size < facts.players.length - 1) return false
+  if (j.me >= 0 && pidOf[j.me] !== facts.me) return false
+  facts.items = j.items
+    .filter(([, idx]) => pidOf[idx] > 0)
+    .map(([t, idx, id, op]) => [t, pidOf[idx], id, op] as [number, number, number, number])
+  facts.itemSource = 'live'
+  facts.gold = j.me >= 0 ? j.gold : undefined
+  const me = facts.players.find((p) => p.pid === facts.me)!
+  me.controlWards = facts.items.filter(
+    ([, pid, id, op]) => pid === facts.me && id === CONTROL_WARD && op === 1
+  ).length
+  facts.controlWardsKnown = true
+  return true
 }
 
 // --- Rejeu ------------------------------------------------------------------------------------
@@ -268,11 +319,29 @@ function frameAt(facts: GameFacts, t: number): number[][] | null {
   return facts.frames[Math.max(0, Math.min(facts.frames.length - 1, Math.floor(t / 60)))]
 }
 
+/** Or en poche du joueur local à l'instant t (journal de partie, sinon minute la plus proche). */
+function goldAt(facts: GameFacts, t: number, meIdx: number): number {
+  if (facts.gold?.length) {
+    let g = facts.gold[0][1]
+    for (const [time, v] of facts.gold) {
+      if (time > t) break
+      g = v
+    }
+    return g
+  }
+  return frameAt(facts, t)?.[meIdx]?.[1] ?? 0
+}
+
 const riotIdOf = (facts: GameFacts, pid: number): string =>
   pid === facts.me ? 'moi#0' : `joueur${pid}#0`
 
 /** Données « en jeu » reconstituées à l'instant t (même format que l'API Live Client Data). */
-export function liveAt(gd: GameData, facts: GameFacts, t: number): LiveGameData {
+export function liveAt(
+  gd: GameData,
+  facts: GameFacts,
+  t: number,
+  finalItems = false
+): LiveGameData {
   const frame = frameAt(facts, t)
   const score = new Map<number, { k: number; d: number; a: number }>()
   for (const p of facts.players) score.set(p.pid, { k: 0, d: 0, a: 0 })
@@ -284,7 +353,9 @@ export function liveAt(gd: GameData, facts: GameFacts, t: number): LiveGameData 
   }
   const players: LivePlayer[] = facts.players.map((p, idx) => {
     const champ = gd.champions.get(p.champ)
-    const inv = inventoryAt(facts, p.pid, t)
+    const inv = finalItems
+      ? p.items.reduce((m, id) => m.set(id, (m.get(id) ?? 0) + 1), new Map<number, number>())
+      : inventoryAt(facts, p.pid, t)
     let slot = 0
     const items = [...inv.entries()].map(([itemID, count]) => {
       const info = gd.items.get(itemID)
@@ -367,7 +438,8 @@ export interface GameStats {
   levelDiff15: number | null
   kp: number
   visionPerMin: number
-  controlWardsPer10: number
+  /** null : inconnu (partie jouée sans l'app ouverte). */
+  controlWardsPer10: number | null
   firstItemMin: number | null
   secondItemMin: number | null
   deathsWithGold: number
@@ -396,6 +468,8 @@ export interface GameReport {
   bench: Benchmark
   benchSource: 'master' | 'défaut'
   hasTimeline: boolean
+  /** Achats connus avec leur minutage (journal de partie). */
+  hasItems: boolean
 }
 
 /** Repères d'un jungler Master+ (remplacés par les vrais chiffres de la méta distante). */
@@ -481,6 +555,9 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
   const enemyJIdx = enemyJ ? facts.players.indexOf(enemyJ) : -1
   const minutes = facts.duration / 60
   const hasTimeline = facts.frames.length >= 5
+  // Achats connus (journal enregistré par l'app pendant la partie) : l'historique du client ne
+  // les fournit pas, sans journal on ne connaît que les objets de fin de partie.
+  const hasItems = facts.items.length > 0
   const bench =
     (champ && catalog.benchmarks?.[champ.id]) ?? catalog.benchmarks?.['_all'] ?? DEFAULT_BENCH
   const benchSource = bench === DEFAULT_BENCH ? 'défaut' : 'master'
@@ -571,8 +648,8 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
     legendaries.push(gd.items.get(b.id)!)
     legendaryTimes.push(b.t)
   }
-  if (!hasTimeline) {
-    // Sans chronologie : objets de fin de partie.
+  if (!hasItems) {
+    // Sans journal : objets de fin de partie.
     for (const id of me.items) {
       const it = gd.items.get(id)
       if (it?.isLegendary && !seen.has(id)) {
@@ -583,7 +660,7 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
   }
   const firstItemMin = legendaryTimes[0] !== undefined ? legendaryTimes[0] / 60 : null
   const secondItemMin = legendaryTimes[1] !== undefined ? legendaryTimes[1] / 60 : null
-  if (hasTimeline) {
+  if (hasItems) {
     if (firstItemMin !== null) {
       const s = rate(firstItemMin, bench.firstItem, true)
       sub.build.push(s)
@@ -620,9 +697,36 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
   // Conformité aux conseils de l'app, achat par achat (inventaires reconstitués).
   const purchases: PurchaseCheck[] = []
   const build = champ ? getBuild(catalog, champ).build : null
-  if (hasTimeline && build && champ) {
-    const enemyKeys = foes.map((p) => p.champ)
-    const allyKeys = allies.map((p) => p.champ)
+  const enemyKeys = foes.map((p) => p.champ)
+  const allyKeys = allies.map((p) => p.champ)
+  if (!hasItems && build && champ && legendaries.length > 0) {
+    // Sans minutage : build final comparé au conseil calculé avec les objets de fin de partie de
+    // tous les joueurs (votre inventaire sans vos objets légendaires).
+    const t = facts.duration
+    const live = liveAt(gd, facts, t, true)
+    const meLive = live.allPlayers.find((p) => p.riotId === live.activePlayer?.riotId) ?? null
+    if (meLive) meLive.items = meLive.items.filter((i) => !gd.items.get(i.itemID)?.isLegendary)
+    const threat = analyzeThreat(gd, enemyKeys, allyKeys, live, champ.id, catalog.profiles)
+    const plan = buildItemPlan(gd, build, threat, meLive, 0)
+    const pending = plan.steps.filter((s) => !s.owned && s.item.isLegendary).map((s) => s.item)
+    const firstN = pending.slice(0, legendaries.length)
+    const missing = firstN.filter((x) => !legendaries.some((l) => l.id === x.id))
+    for (const item of legendaries) {
+      const same = (x: ItemInfo): boolean => x.id === item.id || x.name === item.name
+      const status: PurchaseCheck['status'] = firstN.some(same)
+        ? 'follow'
+        : pending.some(same) || plan.alternatives.some((a) => same(a.item))
+          ? 'plan'
+          : 'off'
+      purchases.push({
+        t: -1,
+        item,
+        status,
+        suggested: status === 'follow' ? null : (missing.shift() ?? null)
+      })
+    }
+  }
+  if (hasItems && build && champ) {
     const done = new Set<number>()
     for (const b of legendaryBuys) {
       if (done.has(b.id)) continue
@@ -785,7 +889,14 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
   let worstGold = 0
   if (hasTimeline) {
     for (const [t] of myDeaths) {
-      const g = frameAt(facts, t)?.[meIdx]?.[1] ?? 0
+      // Journal : or relevé juste avant la mort. Sinon, estimation prudente entre la minute
+      // précédente et la suivante (l'or ne baisse qu'en achetant).
+      const g = facts.gold?.length
+        ? goldAt(facts, t - 1, meIdx)
+        : Math.min(
+            frameAt(facts, t)?.[meIdx]?.[1] ?? 0,
+            frameAt(facts, t + 60)?.[meIdx]?.[1] ?? Infinity
+          )
       if (g >= 1400) {
         deathsWithGold++
         worstGold = Math.max(worstGold, g)
@@ -841,10 +952,12 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
   // Or non dépensé (gestion des retours).
   let unspentShare: number | null = null
   if (hasTimeline && facts.frames.length > 10) {
-    const late = facts.frames.slice(6).map((f) => f[meIdx][1])
-    unspentShare = late.filter((g) => g >= 1500).length / late.length
-    sub.farm.push(Math.max(10, 100 - unspentShare * 220))
-    if (unspentShare >= 0.25)
+    const late = facts.gold?.length
+      ? facts.gold.filter(([t]) => t >= 6 * 60).map(([, g]) => g)
+      : facts.frames.slice(6).map((f) => f[meIdx][1])
+    unspentShare = late.length >= 5 ? late.filter((g) => g >= 1500).length / late.length : null
+    if (unspentShare !== null) sub.farm.push(Math.max(10, 100 - unspentShare * 220))
+    if (unspentShare !== null && unspentShare >= 0.25)
       push({
         id: 'unspent-gold',
         cat: 'farm',
@@ -909,10 +1022,14 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
 
   // --- Vision ---
   const visionPerMin = me.vision / Math.max(minutes, 1)
-  const controlWardsPer10 = (me.controlWards / Math.max(minutes, 1)) * 10
+  // Le nombre de balises de l'historique du client n'est pas fiable (souvent 0, parfois absurde) :
+  // on ne le compte que s'il vient du journal enregistré pendant la partie.
+  const controlWardsPer10 = facts.controlWardsKnown
+    ? (me.controlWards / Math.max(minutes, 1)) * 10
+    : null
   sub.vision.push(rate(visionPerMin, bench.visionPerMin))
-  sub.vision.push(rate(controlWardsPer10, bench.controlWardsPer10))
-  if (me.controlWards === 0 && minutes >= 20)
+  if (controlWardsPer10 !== null) sub.vision.push(rate(controlWardsPer10, bench.controlWardsPer10))
+  if (controlWardsPer10 !== null && me.controlWards === 0 && minutes >= 20)
     push({
       id: 'no-control-ward',
       cat: 'vision',
@@ -990,7 +1107,8 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
     legendaries,
     bench,
     benchSource,
-    hasTimeline
+    hasTimeline,
+    hasItems
   }
 }
 

@@ -128,10 +128,17 @@ function ReportView({ r, version }: { r: GameReport; version: string }): ReactEl
             />
           ))}
         </div>
-        {!r.hasTimeline && (
+        {!r.hasTimeline ? (
           <p className="mt-2 text-[10px] text-slate-500">
             Chronologie indisponible : analyse partielle (pas de minutage ni de rejeu du build).
           </p>
+        ) : (
+          !r.hasItems && (
+            <p className="mt-2 text-[10px] leading-snug text-slate-500">
+              L’historique du client ne contient pas les achats : minutage des objets et balises de
+              contrôle disponibles pour les parties jouées avec l’app ouverte.
+            </p>
+          )
         )}
       </Card>
 
@@ -172,7 +179,7 @@ function ReportView({ r, version }: { r: GameReport; version: string }): ReactEl
 
       {r.purchases.length > 0 && (
         <Card
-          title="Vos achats vs le conseil"
+          title={r.hasItems ? 'Vos achats vs le conseil' : 'Votre build final vs le conseil'}
           right={
             r.adherence !== null ? (
               <Chip tone={r.adherence >= 0.7 ? 'green' : 'orange'}>
@@ -184,9 +191,11 @@ function ReportView({ r, version }: { r: GameReport; version: string }): ReactEl
           <ol className="flex flex-col gap-1.5">
             {r.purchases.map((p) => (
               <li key={`${p.item.id}-${p.t}`} className="flex items-center gap-2">
-                <span className="w-9 text-right text-[10px] tabular-nums text-slate-500">
-                  {fmt(p.t)}
-                </span>
+                {p.t >= 0 && (
+                  <span className="w-9 text-right text-[10px] tabular-nums text-slate-500">
+                    {fmt(p.t)}
+                  </span>
+                )}
                 <ItemIcon item={p.item} version={version} size={24} />
                 <span className="min-w-0 flex-1 truncate text-[11px] text-slate-200">
                   {p.item.nameFr}
@@ -204,7 +213,9 @@ function ReportView({ r, version }: { r: GameReport; version: string }): ReactEl
             ))}
           </ol>
           <p className="mt-2 text-[10px] leading-snug text-slate-500">
-            Conseil recalculé à chaque achat avec les inventaires et le score de ce moment-là.
+            {r.hasItems
+              ? 'Conseil recalculé à chaque achat avec les inventaires et le score de ce moment-là.'
+              : 'Conseil calculé avec les objets de fin de partie de tous les joueurs (sans minutage).'}
           </p>
         </Card>
       )}
@@ -238,7 +249,7 @@ function ReportView({ r, version }: { r: GameReport; version: string }): ReactEl
           <Stat label="Vision / min" value={fr1(s.visionPerMin)} ref_={fr1(r.bench.visionPerMin)} />
           <Stat
             label="Balises / 10 min"
-            value={fr1(s.controlWardsPer10)}
+            value={s.controlWardsPer10 !== null ? fr1(s.controlWardsPer10) : '—'}
             ref_={fr1(r.bench.controlWardsPer10)}
           />
         </div>

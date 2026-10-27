@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GamePhase, RawPostGame } from '../../../shared/types'
 import type { Catalog } from '../engine/catalog'
-import type { GameData } from '../engine/gameData'
+import { champFromLive, type GameData } from '../engine/gameData'
 import { computeLearning, type Learning } from '../engine/learning'
 import {
   analyzeGame,
@@ -61,10 +61,12 @@ export function useReview(gd: GameData | null, catalog: Catalog, autoReview: boo
   const inGameSince = useRef<number | null>(null)
   const busy = useRef(false)
   const autoRef = useRef(autoReview)
+  const gdRef = useRef(gd)
 
   useEffect(() => {
     autoRef.current = autoReview
-  }, [autoReview])
+    gdRef.current = gd
+  }, [autoReview, gd])
 
   // Bilans enregistrés.
   useEffect(() => {
@@ -73,7 +75,10 @@ export function useReview(gd: GameData | null, catalog: Catalog, autoReview: boo
 
   const store = useCallback(async (raw: RawPostGame | null): Promise<string> => {
     if (!raw) return 'partie introuvable dans l’historique du client'
-    const f = normalizeGame(raw)
+    const data = gdRef.current
+    const f = normalizeGame(raw, (rawName, name) =>
+      data ? champFromLive(data, rawName, name)?.key : undefined
+    )
     if ('skip' in f) return `partie ignorée : ${f.skip}`
     const res = await window.api.saveReport(f.gameId, f)
     if (!res.success) return `enregistrement impossible (${res.error})`
