@@ -15,6 +15,8 @@ import {
   type GamePhase,
   type ItemSetPayload,
   type LcuStatus,
+  type RawPostGame,
+  type RecentGame,
   type RecommendedRunePage,
   type RunePagePayload
 } from '../shared/types'
@@ -374,6 +376,96 @@ export class LcuService extends EventEmitter {
     } catch (error) {
       return { success: false, error: String((error as Error)?.message ?? error) }
     }
+  }
+
+  // --- Après-partie ----------------------------------------------------------------------
+
+  /** Identifiants des dernières parties du joueur (les plus récentes d'abord). */
+  async getRecentGames(count: number): Promise<RecentGame[]> {
+    if (!this.credentials) return []
+    const res = await this.request<any>(
+      'GET',
+      `/lol-match-history/v1/products/lol/current-summoner/matches?begIndex=0&endIndex=${Math.max(1, Math.min(count, 100))}`
+    )
+    if (!res.ok || !res.data) return []
+    const list: any[] = Array.isArray(res.data?.games?.games)
+      ? res.data.games.games
+      : Array.isArray(res.data?.games)
+        ? res.data.games
+        : []
+    return list
+      .map((g) => ({
+        gameId: Number(g.gameId),
+        createdAt: Number(g.gameCreation ?? 0),
+        queueId: Number(g.queueId ?? 0),
+        mapId: Number(g.mapId ?? 0)
+      }))
+      .filter((g) => g.gameId > 0)
+      .sort((a, b) => b.createdAt - a.createdAt)
+  }
+
+  /** Partie qui vient de se terminer (écran de fin de partie). */
+  async getEndOfGameId(): Promise<number | null> {
+    if (!this.credentials) return null
+    try {
+      const res = await this.request<any>('GET', '/lol-end-of-game/v1/eog-stats-block')
+      const id = Number(res.data?.gameId ?? 0)
+      return res.ok && id > 0 ? id : null
+    } catch {
+      return null
+    }
+  }
+
+  /** Détail complet d'une partie et sa chronologie (minute par minute), avec le puuid du joueur. */
+  async getGameDetails(gameId: number): Promise<RawPostGame | null> {
+    if (!this.credentials) return null
+    const game = await this.request<any>('GET', `/lol-match-history/v1/games/${gameId}`)
+    const participants = game.data?.participants ?? game.data?.info?.participants
+    if (!game.ok || !Array.isArray(participants) || participants.length < 2) return null
+    let timeline: unknown = null
+    try {
+      const tl = await this.request<any>('GET', `/lol-match-history/v1/game-timelines/${gameId}`)
+      if (tl.ok) timeline = tl.data
+    } catch (error) {
+      debugLog('postgame', { timelineError: String(error) })
+    }
+    const summoner = await this.request<any>('GET', '/lol-summoner/v1/current-summoner')
+    return {
+      gameId,
+      game: game.data,
+      timeline,
+      puuid: String(summoner.data?.puuid ?? ''),
+      summonerId: Number(summoner.data?.summonerId ?? 0)
+    }
+  }
+
+  /**
+   * Récupère la partie qui vient de se terminer : l'historique du client met parfois une à deux
+   * minutes à l'enregistrer, on réessaie donc pendant quelques minutes.
+   */
+  async waitForFinishedGame(
+    sinceMs: number,
+    timeoutMs = 4 * 60 * 1000
+  ): Promise<RawPostGame | null> {
+    const deadline = Date.now() + timeoutMs
+    let gameId = await this.getEndOfGameId()
+    while (Date.now() < deadline && this.credentials) {
+      try {
+        if (!gameId) {
+          const recent = await this.getRecentGames(3)
+          const candidate = recent.find((g) => g.createdAt >= sinceMs - 15 * 60 * 1000)
+          if (candidate) gameId = candidate.gameId
+        }
+        if (gameId) {
+          const details = await this.getGameDetails(gameId)
+          if (details) return details
+        }
+      } catch (error) {
+        debugLog('postgame', { waitError: String(error) })
+      }
+      await sleep(10000)
+    }
+    return null
   }
 
   // --- État ------------------------------------------------------------------------------

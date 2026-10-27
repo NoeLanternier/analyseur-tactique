@@ -21,6 +21,24 @@ export interface JunglerStat {
   vs: Record<string, [number, number]>
 }
 
+/** Repères d'un jungler Master+ (moyennes du patch, méta distante). */
+export interface Benchmark {
+  games: number
+  /** Sbires + monstres à 10 et 15 min. */
+  cs10: number
+  cs15: number
+  /** Or total et niveau à 15 min. */
+  gold15: number
+  level15: number
+  /** Minute de fin du 1er et du 2e objet légendaire. */
+  firstItem: number
+  secondItem: number
+  /** Participation aux éliminations (0..1). */
+  kp: number
+  visionPerMin: number
+  controlWardsPer10: number
+}
+
 export interface Catalog {
   patch: string
   builds: Map<string, JunglerBuild>
@@ -30,6 +48,8 @@ export interface Catalog {
   profiles?: MeasuredProfiles
   /** Taux de victoire des junglers et de leurs affrontements (méta distante). */
   junglerStats?: Record<string, JunglerStat>
+  /** Repères Master+ par champion (et '_all' pour l'ensemble des junglers). */
+  benchmarks?: Record<string, Benchmark>
 }
 
 export function defaultCatalog(): Catalog {
@@ -113,7 +133,8 @@ export function mergeOverride(
       builds,
       origin: accepted > 0 ? 'distante' : base.origin,
       profiles: parseProfiles(raw?.profiles) ?? base.profiles,
-      junglerStats: parseJunglerStats(raw?.junglers) ?? base.junglerStats
+      junglerStats: parseJunglerStats(raw?.junglers) ?? base.junglerStats,
+      benchmarks: parseBenchmarks(raw?.benchmarks) ?? base.benchmarks
     },
     accepted,
     rejected,
@@ -173,6 +194,31 @@ function parseJunglerStats(raw: any): Record<string, JunglerStat> | undefined {
       if (Array.isArray(v) && num(v[0]) !== null && num(v[1]) !== null) vs[enemy] = [v[0], v[1]]
     }
     out[id] = { games: j.games, winRate: j.winRate, vs }
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+const BENCH_KEYS = [
+  'games',
+  'cs10',
+  'cs15',
+  'gold15',
+  'level15',
+  'firstItem',
+  'secondItem',
+  'kp',
+  'visionPerMin',
+  'controlWardsPer10'
+] as const
+
+function parseBenchmarks(raw: any): Record<string, Benchmark> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const out: Record<string, Benchmark> = {}
+  for (const [id, b] of Object.entries<any>(raw)) {
+    if (!BENCH_KEYS.every((k) => num(b?.[k]) !== null)) continue
+    // Valeurs aberrantes (trop peu de parties, bug) : ignorées.
+    if (b.cs10 <= 0 || b.firstItem <= 0 || b.secondItem <= b.firstItem || b.kp <= 0) continue
+    out[id] = Object.fromEntries(BENCH_KEYS.map((k) => [k, b[k]])) as unknown as Benchmark
   }
   return Object.keys(out).length ? out : undefined
 }

@@ -39,5 +39,7 @@ function sanitize(raw: Record<string, unknown>): Settings {
   if (typeof raw.metaUrl === 'string') s.metaUrl = raw.metaUrl.trim()
   if (typeof raw.debug === 'boolean') s.debug = raw.debug
   if (typeof raw.launchAtStartup === 'boolean') s.launchAtStartup = raw.launchAtStartup
+  if (typeof raw.autoReview === 'boolean') s.autoReview = raw.autoReview
+  if (typeof raw.personalLearning === 'boolean') s.personalLearning = raw.personalLearning
   return s
 }

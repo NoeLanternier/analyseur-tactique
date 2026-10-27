@@ -104,6 +104,21 @@ export function SettingsTab({ t }: { t: TactiqueState }): ReactElement {
         </label>
       </Card>
 
+      <Card title="Bilan et apprentissage">
+        <Toggle
+          label="Bilan automatique en fin de partie"
+          hint="Analyse chaque partie jouée en jungle (farm, build, combats, objectifs, vision)."
+          checked={s.autoReview}
+          onChange={(v) => update({ autoReview: v })}
+        />
+        <Toggle
+          label="Adapter le build à mes résultats"
+          hint="Les objets qui vous réussissent remontent un peu dans le build (effet limité)."
+          checked={s.personalLearning}
+          onChange={(v) => update({ personalLearning: v })}
+        />
+      </Card>
+
       <Card title="Démarrage">
         <Toggle
           label="Lancer avec Windows"

@@ -156,6 +156,10 @@ export interface Settings {
   debug: boolean
   /** Lancer l'application au démarrage de Windows. */
   launchAtStartup: boolean
+  /** Bilan automatique en fin de partie. */
+  autoReview: boolean
+  /** Adapter le build à vos propres résultats (apprentissage à partir des bilans). */
+  personalLearning: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -166,7 +170,26 @@ export const DEFAULT_SETTINGS: Settings = {
   side: 'left',
   metaUrl: '',
   debug: false,
-  launchAtStartup: true
+  launchAtStartup: true,
+  autoReview: true,
+  personalLearning: true
+}
+
+/** Partie de l'historique du client. */
+export interface RecentGame {
+  gameId: number
+  createdAt: number
+  queueId: number
+  mapId: number
+}
+
+/** Données brutes d'après-partie lues dans le client (format de l'historique Riot). */
+export interface RawPostGame {
+  gameId: number
+  game: unknown
+  timeline: unknown
+  puuid: string
+  summonerId: number
 }
 
 export interface TactiqueApi {
@@ -187,6 +210,14 @@ export interface TactiqueApi {
   getSettings: () => Promise<Settings>
   saveSettings: (settings: Settings) => Promise<Settings>
   fetchMetaOverride: (url: string) => Promise<{ ok: boolean; data?: unknown; error?: string }>
+  /** Attend la partie qui vient de se terminer (jusqu'à 4 min) et la renvoie. */
+  waitForFinishedGame: (sinceMs: number) => Promise<RawPostGame | null>
+  getRecentGames: (count: number) => Promise<RecentGame[]>
+  getGameDetails: (gameId: number) => Promise<RawPostGame | null>
+  /** Bilans enregistrés (données compactes de chaque partie), les plus récents d'abord. */
+  listReports: () => Promise<unknown[]>
+  saveReport: (gameId: number, facts: unknown) => Promise<ActionResult>
+  openReportsFolder: () => void
   setOverlayMode: (expanded: boolean) => void
   closeApp: () => void
 }

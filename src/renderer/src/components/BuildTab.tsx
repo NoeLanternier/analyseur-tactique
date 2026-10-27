@@ -1,4 +1,4 @@
-import { Coins, LoaderCircle, TriangleAlert, Check, Info } from 'lucide-react'
+import { Coins, LoaderCircle, TriangleAlert, Check, Info, Lightbulb } from 'lucide-react'
 import type { ReactElement } from 'react'
 import type { TactiqueState, SyncState } from '../hooks/useTactique'
 import { champIcon } from '../engine/gameData'
@@ -50,6 +50,49 @@ function SyncBadge({ sync, okText }: { sync: SyncState; okText: string }): React
     default:
       return null
   }
+}
+
+/** Rappels tirés des bilans : avant la partie (points faibles) et pendant (situations à risque). */
+function CoachCard({ t, inGame }: { t: TactiqueState; inGame: boolean }): ReactElement | null {
+  if (inGame) {
+    if (t.nudges.length === 0) return null
+    return (
+      <Card title="Coach">
+        <ul className="flex flex-col gap-1">
+          {t.nudges.map((n) => (
+            <li
+              key={n.id}
+              className={`flex gap-1.5 text-[11px] ${n.tone === 'orange' ? 'text-orange-200' : 'text-slate-200'}`}
+            >
+              <Lightbulb size={12} className="mt-0.5 shrink-0 text-gold" /> {n.text}
+            </li>
+          ))}
+        </ul>
+      </Card>
+    )
+  }
+  const recurring = t.review.learning.recurring.slice(0, 3)
+  if (recurring.length === 0) return null
+  return (
+    <Card title="Rappels de vos dernières parties">
+      <ul className="flex flex-col gap-1.5">
+        {recurring.map((r) => (
+          <li key={r.id} className="flex gap-1.5">
+            <Lightbulb size={12} className="mt-0.5 shrink-0 text-gold" />
+            <div className="min-w-0">
+              <div className="text-[11px] text-orange-200">
+                {r.label}{' '}
+                <span className="text-slate-500">
+                  ({r.count}/{r.of})
+                </span>
+              </div>
+              {r.tip && <div className="text-[10px] text-slate-400">{r.tip}</div>}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
 }
 
 function formatTime(sec: number): string {
@@ -115,6 +158,7 @@ export function BuildTab({ t }: { t: TactiqueState }): ReactElement | null {
       </div>
 
       {!inGame && !t.draft.isLocked && <AdviceCard t={t} />}
+      {!inGame && <CoachCard t={t} inGame={false} />}
 
       {t.genericBuild && (
         <p className="flex gap-1.5 rounded border border-orange-400/30 bg-orange-500/10 p-2 text-[11px] text-orange-200">
@@ -170,6 +214,8 @@ export function BuildTab({ t }: { t: TactiqueState }): ReactElement | null {
           )}
         </Card>
       )}
+
+      {inGame && <CoachCard t={t} inGame />}
 
       {/* Runes */}
       {runePage ? (

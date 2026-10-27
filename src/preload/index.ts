@@ -27,6 +27,12 @@ const api: TactiqueApi = {
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   fetchMetaOverride: (url) => ipcRenderer.invoke('fetch-meta-override', url),
+  waitForFinishedGame: (sinceMs) => ipcRenderer.invoke('wait-finished-game', sinceMs),
+  getRecentGames: (count) => ipcRenderer.invoke('get-recent-games', count),
+  getGameDetails: (gameId) => ipcRenderer.invoke('get-game-details', gameId),
+  listReports: () => ipcRenderer.invoke('list-reports'),
+  saveReport: (gameId, facts) => ipcRenderer.invoke('save-report', gameId, facts),
+  openReportsFolder: () => ipcRenderer.send('open-reports-folder'),
   setOverlayMode: (expanded) => ipcRenderer.send('set-overlay-mode', expanded),
   closeApp: () => ipcRenderer.send('close-app')
 }

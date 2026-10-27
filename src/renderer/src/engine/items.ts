@@ -140,11 +140,15 @@ function dataScore(
   return { score: sum / weightSum, reason }
 }
 
+/** Ajustement personnel d'un objet, appris de vos propres parties (voir engine/learning.ts). */
+export type PersonalItemBonus = (itemName: string) => { bonus: number; reason?: string } | null
+
 function scoreItem(
   item: ItemInfo,
   threat: ThreatProfile,
   optionIndex: number,
-  situational?: JunglerBuild['situational']
+  situational?: JunglerBuild['situational'],
+  personal?: PersonalItemBonus
 ): Scored {
   const rule =
     ITEM_RULES[item.name] ??
@@ -184,6 +188,12 @@ function scoreItem(
       reason = `vs ${threat.fed.champ.name}`
   }
   if (learned?.reason && !(reason && reason.startsWith('vs '))) reason = learned.reason
+  // Vos résultats avec cet objet (bonus ou malus limité : les règles et la méta restent la base).
+  const mine = personal?.(item.name)
+  if (mine) {
+    score += mine.bonus
+    if (mine.reason && !(reason && reason.startsWith('vs '))) reason = mine.reason
+  }
   return { item, score, reason, defensive: rule?.role === 'defense' || rule?.role === 'utility' }
 }
 
@@ -277,7 +287,8 @@ export function buildItemPlan(
   build: JunglerBuild,
   threat: ThreatProfile,
   me: LivePlayer | null,
-  currentGold: number
+  currentGold: number,
+  personal?: PersonalItemBonus
 ): ItemPlan {
   const unresolved: string[] = []
   const resolve = (name: string): ItemInfo | undefined => {
@@ -334,7 +345,13 @@ export function buildItemPlan(
   )
   const scored = [...pool.values()]
     .map((it) => {
-      const sc = scoreItem(it, threat, optionNames.indexOf(norm(it.name)), build.situational)
+      const sc = scoreItem(
+        it,
+        threat,
+        optionNames.indexOf(norm(it.name)),
+        build.situational,
+        personal
+      )
       const started = startedComponents.find((c) => buildsFrom(gd, it, c.id))
       if (started) {
         sc.score += 0.5
@@ -356,7 +373,7 @@ export function buildItemPlan(
     const third = coreSteps[2].item
     const thirdRule = ITEM_RULES[third.name]
     const thirdOwned = ownsId(third.id)
-    const thirdScore = scoreItem(third, threat, -1, build.situational).score
+    const thirdScore = scoreItem(third, threat, -1, build.situational, personal).score
     const thirdIsDamage = !thirdRule || thirdRule.role === 'damage'
     if (!thirdOwned && (thirdIsDamage || urgent.score - thirdScore >= 0.45)) {
       coreSteps[2] = {

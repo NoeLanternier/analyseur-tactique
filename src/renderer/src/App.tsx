@@ -1,11 +1,23 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
-import { Activity, Gauge, LoaderCircle, Pin, PinOff, Settings, Swords, X, Zap } from 'lucide-react'
+import {
+  Activity,
+  ClipboardCheck,
+  Gauge,
+  LoaderCircle,
+  Pin,
+  PinOff,
+  Settings,
+  Swords,
+  X,
+  Zap
+} from 'lucide-react'
 import { useTactique } from './hooks/useTactique'
 import { BuildTab } from './components/BuildTab'
 import { AnalysisTab } from './components/AnalysisTab'
 import { SettingsTab } from './components/SettingsTab'
+import { ReviewTab } from './components/ReviewTab'
 
-type Tab = 'build' | 'analyse' | 'settings'
+type Tab = 'build' | 'analyse' | 'review' | 'settings'
 
 export default function App(): ReactElement {
   const t = useTactique()
@@ -43,6 +55,11 @@ export default function App(): ReactElement {
         >
           {!t.gd ? (
             <LoaderCircle size={18} className="animate-spin text-gold" />
+          ) : t.review.fresh && !t.live ? (
+            <ClipboardCheck
+              size={22}
+              className="animate-pulse text-gold drop-shadow-[0_0_8px_rgba(200,170,110,0.6)]"
+            />
           ) : fed ? (
             <Activity
               size={22}
@@ -62,6 +79,7 @@ export default function App(): ReactElement {
   const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
     { id: 'build', label: 'Build', icon: <Swords size={13} /> },
     { id: 'analyse', label: 'Analyse', icon: <Gauge size={13} /> },
+    { id: 'review', label: 'Bilan', icon: <ClipboardCheck size={13} /> },
     { id: 'settings', label: 'Réglages', icon: <Settings size={13} /> }
   ]
 
@@ -103,12 +121,18 @@ export default function App(): ReactElement {
           {tabs.map((x) => (
             <button
               key={x.id}
-              onClick={() => setTab(x.id)}
-              className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-[11px] font-semibold uppercase tracking-wider ${tab === x.id ? 'border-b-2 border-lolblue text-lolblue' : 'text-slate-500 hover:text-slate-300'}`}
+              onClick={() => {
+                setTab(x.id)
+                if (x.id === 'review') t.review.markSeen()
+              }}
+              className={`flex flex-1 items-center justify-center gap-1 py-2 text-[10px] font-semibold uppercase tracking-wide ${tab === x.id ? 'border-b-2 border-lolblue text-lolblue' : 'text-slate-500 hover:text-slate-300'}`}
             >
               {x.icon} {x.label}
               {x.id === 'analyse' && fed && (
                 <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+              )}
+              {x.id === 'review' && t.review.fresh && (
+                <span className="h-1.5 w-1.5 rounded-full bg-gold" />
               )}
             </button>
           ))}
@@ -128,6 +152,7 @@ export default function App(): ReactElement {
           )}
           {t.gd && tab === 'build' && <BuildTab t={t} />}
           {t.gd && tab === 'analyse' && <AnalysisTab t={t} />}
+          {t.gd && tab === 'review' && <ReviewTab t={t} />}
           {tab === 'settings' && <SettingsTab t={t} />}
         </main>
       </div>

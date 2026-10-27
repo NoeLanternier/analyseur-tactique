@@ -6,6 +6,8 @@ import { LivePoller } from './live'
 import { loadSettings, saveSettings } from './settings'
 import { setDebug } from './logger'
 import { checkForUpdates, getUpdateStatus, initUpdater, installUpdate } from './updater'
+import { listReports, reportsDir, saveReport } from './reports'
+import * as fs from 'fs'
 import type { ItemSetPayload, RunePagePayload, Settings } from '../shared/types'
 
 // Plus de "ignore-certificate-errors" : l'API en jeu est vérifiée avec le certificat Riot (live.ts).
@@ -115,13 +117,6 @@ function registerIpc(): void {
     settings = saveSettings(next)
     setDebug(settings.debug)
     if (settings.launchAtStartup !== previousStartup) applyLoginItem(settings.launchAtStartup)
-
-    /** Lancement au démarrage de Windows (uniquement pour l'app installée ou l'exe). */
-    function applyLoginItem(enabled: boolean): void {
-      if (!app.isPackaged) return
-      const exe = process.env['PORTABLE_EXECUTABLE_FILE'] || process.execPath
-      app.setLoginItemSettings({ openAtLogin: enabled, path: exe })
-    }
     if (mainWindow && settings.side !== previousSide)
       mainWindow.setBounds(windowBounds(settings.side))
     return settings
@@ -140,6 +135,22 @@ function registerIpc(): void {
     } finally {
       clearTimeout(timeout)
     }
+  })
+
+  // Après-partie.
+  ipcMain.handle('wait-finished-game', (_e, sinceMs: number) =>
+    lcu.waitForFinishedGame(Number(sinceMs) || 0)
+  )
+  ipcMain.handle('get-recent-games', (_e, count: number) => lcu.getRecentGames(Number(count) || 20))
+  ipcMain.handle('get-game-details', (_e, gameId: number) => lcu.getGameDetails(Number(gameId)))
+  ipcMain.handle('list-reports', () => listReports())
+  ipcMain.handle('save-report', (_e, gameId: number, facts: unknown) =>
+    saveReport(Number(gameId), facts)
+  )
+  ipcMain.on('open-reports-folder', () => {
+    const dir = reportsDir()
+    fs.mkdirSync(dir, { recursive: true })
+    void shell.openPath(dir)
   })
 
   ipcMain.on('set-overlay-mode', (event, expanded: boolean) => {

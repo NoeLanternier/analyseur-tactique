@@ -23,6 +23,9 @@ import { buildItemPlan, toItemSet, type ItemPlan } from '../engine/items'
 import { buildRunePage, type ResolvedRunePage } from '../engine/runes'
 import { analyzeThreat, findMe, type ThreatProfile } from '../engine/threat'
 import { META_PATCH, type JunglerBuild } from '../data/junglers'
+import { liveNudges, type Nudge } from '../engine/learning'
+import { DEFAULT_BENCH } from '../engine/postgame'
+import { useReview, type ReviewState } from './useReview'
 
 export type SyncState =
   | { state: 'idle' }
@@ -56,6 +59,10 @@ export interface TactiqueState {
   offRole: boolean
   /** Conseils de pick et de ban (pendant la sélection, avant le verrouillage). */
   advice: DraftAdvice | null
+  /** Bilans d'après-partie et apprentissage. */
+  review: ReviewState
+  /** Rappels en partie tirés de vos points faibles récurrents. */
+  nudges: Nudge[]
 }
 
 const INJECT_DELAY = 700
@@ -274,9 +281,26 @@ export function useTactique(): TactiqueState {
     )
   }, [gd, champ, threat, riot, genericBuild, build, settings.runeSource])
 
+  const review = useReview(gd, catalog, settings.autoReview)
+  const personal = useMemo(
+    () =>
+      settings.personalLearning && review.learning.games > 0
+        ? review.learning.bonusFor(champ?.id ?? null)
+        : undefined,
+    [settings.personalLearning, review.learning, champ]
+  )
+
   const plan = useMemo(
-    () => (gd && build && threat ? buildItemPlan(gd, build, threat, me, currentGold) : null),
-    [gd, build, threat, me, currentGold]
+    () =>
+      gd && build && threat ? buildItemPlan(gd, build, threat, me, currentGold, personal) : null,
+    [gd, build, threat, me, currentGold, personal]
+  )
+
+  const bench =
+    (champ && catalog.benchmarks?.[champ.id]) ?? catalog.benchmarks?.['_all'] ?? DEFAULT_BENCH
+  const nudges = useMemo(
+    () => liveNudges(review.learning, live, me, plan, bench),
+    [review.learning, live, me, plan, bench]
   )
 
   // Injection des runes pendant la sélection (avec délai pour ne pas spammer au survol).
@@ -369,6 +393,8 @@ export function useTactique(): TactiqueState {
     runeSync,
     itemSetSync,
     offRole,
-    advice
+    advice,
+    review,
+    nudges
   }
 }
