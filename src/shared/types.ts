@@ -1,5 +1,6 @@
 // Types partagés entre le processus main, le preload et l'interface.
 // Aucun code exécutable ici : uniquement des types.
+import type { Lang, LanguageSetting } from './i18n'
 
 export type LcuStatus = 'disconnected' | 'connecting' | 'connected'
 
@@ -160,6 +161,8 @@ export interface Settings {
   autoReview: boolean
   /** Adapter le build à vos propres résultats (apprentissage à partir des bilans). */
   personalLearning: boolean
+  /** Langue de l'application : auto = langue du client League of Legends. */
+  language: LanguageSetting
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -172,7 +175,8 @@ export const DEFAULT_SETTINGS: Settings = {
   debug: false,
   launchAtStartup: true,
   autoReview: true,
-  personalLearning: true
+  personalLearning: true,
+  language: 'auto'
 }
 
 /** Partie de l'historique du client. */
@@ -219,7 +223,14 @@ export interface TactiqueApi {
   onLcuStatus: (cb: (status: LcuStatus) => void) => () => void
   onLiveUpdate: (cb: (data: LiveGameData | null) => void) => () => void
   onTogglePin: (cb: () => void) => () => void
-  getInitialState: () => Promise<{ status: LcuStatus; phase: GamePhase; draft: DraftState }>
+  getInitialState: () => Promise<{
+    status: LcuStatus
+    phase: GamePhase
+    draft: DraftState
+    lang: Lang
+  }>
+  /** Langue effective (réglage, ou langue du client LoL en mode auto). */
+  onLangUpdate: (cb: (lang: Lang) => void) => () => void
   applyRunes: (payload: RunePagePayload) => Promise<ActionResult>
   applyItemSet: (payload: ItemSetPayload) => Promise<ActionResult>
   getRecommendedRunes: (championId: number, position: string) => Promise<RecommendedRunePage[]>

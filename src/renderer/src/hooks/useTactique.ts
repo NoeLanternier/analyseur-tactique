@@ -26,6 +26,7 @@ import { META_PATCH, type JunglerBuild } from '../data/junglers'
 import { liveNudges, type Nudge } from '../engine/learning'
 import { DEFAULT_BENCH } from '../engine/postgame'
 import { useReview, type ReviewState } from './useReview'
+import { fmtNumber, getLang, setLang, tr, type Lang } from '../../../shared/i18n'
 
 export type SyncState =
   | { state: 'idle' }
@@ -35,6 +36,8 @@ export type SyncState =
   | { state: 'disabled' }
 
 export interface TactiqueState {
+  /** Langue effective de l'application. */
+  lang: Lang
   gd: GameData | null
   loadError: string | null
   catalog: Catalog
@@ -81,8 +84,15 @@ export function useTactique(): TactiqueState {
   const [override, setOverride] = useState<{
     url: string
     catalog: Catalog | null
-    note: string
+    error?: string
+    info?: {
+      accepted: number
+      rejected: number
+      sampleGames: number | null
+      generatedAt: string | null
+    }
   } | null>(null)
+  const [lang, setLangState] = useState<Lang>(getLang())
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [lcuStatus, setLcuStatus] = useState<LcuStatus>('disconnected')
   const [phase, setPhase] = useState<GamePhase>('None')
@@ -134,7 +144,14 @@ export function useTactique(): TactiqueState {
       setPhase(p)
     }
     void api.getSettings().then(setSettings)
+    // La langue est appliquée au module i18n avant le nouveau rendu : tous les textes calculés
+    // (moteur, interface) suivent alors la langue choisie.
+    const onLang = (l: Lang): void => {
+      setLang(l)
+      setLangState(l)
+    }
     void api.getInitialState().then((s) => {
+      if (s.lang) onLang(s.lang)
       setLcuStatus(s.status)
       onPhase(s.phase)
       setDraft(s.draft)
@@ -143,7 +160,8 @@ export function useTactique(): TactiqueState {
       api.onLcuStatus(setLcuStatus),
       api.onPhaseUpdate(onPhase),
       api.onDraftUpdate(setDraft),
-      api.onLiveUpdate(setLive)
+      api.onLiveUpdate(setLive),
+      api.onLangUpdate(onLang)
     ]
     return () => offs.forEach((off) => off())
   }, [])
@@ -161,29 +179,20 @@ export function useTactique(): TactiqueState {
           setOverride((prev) =>
             prev?.url === url && prev.catalog
               ? prev
-              : {
-                  url,
-                  catalog: null,
-                  note: `URL de méta inaccessible (${res.error}) : base intégrée utilisée.`
-                }
+              : { url, catalog: null, error: res.error ?? '?' }
           )
           return
         }
         const merged = mergeOverride(defaultCatalog(), res.data)
-        const date = merged.generatedAt
-          ? new Date(merged.generatedAt).toLocaleString('fr-FR')
-          : null
         setOverride({
           url,
           catalog: merged.catalog,
-          note:
-            `Méta distante patch ${merged.catalog.patch} : ${merged.accepted} builds` +
-            (merged.sampleGames
-              ? ` calculés sur ${merged.sampleGames.toLocaleString('fr-FR')} parties`
-              : '') +
-            (date ? ` (mise à jour du ${date})` : '') +
-            (merged.rejected ? `, ${merged.rejected} ignorés (format invalide)` : '') +
-            '.'
+          info: {
+            accepted: merged.accepted,
+            rejected: merged.rejected,
+            sampleGames: merged.sampleGames,
+            generatedAt: merged.generatedAt
+          }
         })
       })
     }
@@ -197,9 +206,36 @@ export function useTactique(): TactiqueState {
 
   const activeOverride = settings.metaUrl && override?.url === settings.metaUrl ? override : null
   const catalog = useMemo(() => activeOverride?.catalog ?? defaultCatalog(), [activeOverride])
-  const catalogNote = activeOverride?.note ?? null
+  const catalogNote = useMemo(() => {
+    if (!activeOverride) return null
+    if (activeOverride.error || !activeOverride.catalog || !activeOverride.info)
+      return tr(
+        `URL de méta inaccessible (${activeOverride.error}) : base intégrée utilisée.`,
+        `Meta URL unreachable (${activeOverride.error}): built-in database used.`
+      )
+    const i = activeOverride.info
+    const date = i.generatedAt
+      ? new Date(i.generatedAt).toLocaleString(lang === 'en' ? 'en-US' : 'fr-FR')
+      : null
+    const patch = activeOverride.catalog.patch
+    return lang === 'en'
+      ? `Remote meta patch ${patch}: ${i.accepted} builds` +
+          (i.sampleGames ? ` computed from ${fmtNumber(i.sampleGames)} games` : '') +
+          (date ? ` (updated ${date})` : '') +
+          (i.rejected ? `, ${i.rejected} ignored (invalid format)` : '') +
+          '.'
+      : `Méta distante patch ${patch} : ${i.accepted} builds` +
+          (i.sampleGames ? ` calculés sur ${fmtNumber(i.sampleGames)} parties` : '') +
+          (date ? ` (mise à jour du ${date})` : '') +
+          (i.rejected ? `, ${i.rejected} ignorés (format invalide)` : '') +
+          '.'
+  }, [activeOverride, lang])
 
-  const validation = useMemo(() => (gd ? validateCatalog(gd, catalog).issues : []), [gd, catalog])
+  const validation = useMemo(
+    () => (gd ? validateCatalog(gd, catalog).issues : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lang : les textes calculés suivent la langue
+    [gd, catalog, lang]
+  )
 
   // Champion local : sélection, sinon données de partie (app lancée pendant la partie).
   const champ = useMemo<ChampInfo | null>(() => {
@@ -245,7 +281,8 @@ export function useTactique(): TactiqueState {
       gd && phase === 'ChampSelect' && !draft.isLocked
         ? computeDraftAdvice(gd, catalog, draft, pool)
         : null,
-    [gd, phase, draft, catalog, pool]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lang : les textes calculés suivent la langue
+    [gd, phase, draft, catalog, pool, lang]
   )
 
   const threat = useMemo(
@@ -260,7 +297,8 @@ export function useTactique(): TactiqueState {
             catalog.profiles
           )
         : null,
-    [gd, draft.enemyIds, draft.allyIds, live, champ, catalog.profiles]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lang : les textes calculés suivent la langue
+    [gd, draft.enemyIds, draft.allyIds, live, champ, catalog.profiles, lang]
   )
   const me = useMemo(() => (gd ? findMe(gd, live, champ?.id ?? null) : null), [gd, live, champ])
   const currentGold = live?.activePlayer?.currentGold ?? 0
@@ -272,7 +310,7 @@ export function useTactique(): TactiqueState {
     const buildPatch = build?.patch ?? META_PATCH
     return buildRunePage(
       gd,
-      champ.name,
+      champ.label,
       genericBuild ? null : build,
       buildPatch,
       pages,
@@ -281,7 +319,7 @@ export function useTactique(): TactiqueState {
     )
   }, [gd, champ, threat, riot, genericBuild, build, settings.runeSource])
 
-  const review = useReview(gd, catalog, settings.autoReview)
+  const review = useReview(gd, catalog, settings.autoReview, lang)
   const personal = useMemo(
     () =>
       settings.personalLearning && review.learning.games > 0
@@ -293,14 +331,16 @@ export function useTactique(): TactiqueState {
   const plan = useMemo(
     () =>
       gd && build && threat ? buildItemPlan(gd, build, threat, me, currentGold, personal) : null,
-    [gd, build, threat, me, currentGold, personal]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lang : les textes calculés suivent la langue
+    [gd, build, threat, me, currentGold, personal, lang]
   )
 
   const bench =
     (champ && catalog.benchmarks?.[champ.id]) ?? catalog.benchmarks?.['_all'] ?? DEFAULT_BENCH
   const nudges = useMemo(
     () => liveNudges(review.learning, live, me, plan, bench),
-    [review.learning, live, me, plan, bench]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lang : les textes calculés suivent la langue
+    [review.learning, live, me, plan, bench, lang]
   )
 
   // Injection des runes pendant la sélection (avec délai pour ne pas spammer au survol).
@@ -336,7 +376,7 @@ export function useTactique(): TactiqueState {
     if (!settings.autoItemSet || phase !== 'ChampSelect' || !draft.isLocked || !plan || !champ)
       return
     if (lcuStatus !== 'connected' || appliedItemSet.current === itemSetKey) return
-    const payload = toItemSet(champ.key, champ.name, plan)
+    const payload = toItemSet(champ.key, champ.label, plan)
     const timer = setTimeout(() => {
       setItemSetState({ key: itemSetKey, sync: { state: 'pending' } })
       void window.api.applyItemSet(payload).then((res) => {
@@ -372,6 +412,7 @@ export function useTactique(): TactiqueState {
     live === null && !!draft.position && draft.position !== 'jungle' && !draft.hasSmite
 
   return {
+    lang,
     gd,
     loadError,
     catalog,

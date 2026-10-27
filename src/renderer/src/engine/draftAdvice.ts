@@ -2,6 +2,7 @@ import type { ChampionPool, DraftState } from '../../../shared/types'
 import type { Catalog } from './catalog'
 import type { ChampInfo, GameData } from './gameData'
 import { profileOf } from './threat'
+import { fmtNumber, fmtPct, tr } from '../../../shared/i18n'
 
 // Conseils de pick et de ban pour la jungle, à partir des statistiques Master+ du patch
 // (taux de victoire de chaque jungler et de chaque affrontement de junglers), de la composition
@@ -31,7 +32,7 @@ export interface DraftAdvice {
 
 const bayes = (games: number, wr: number, prior: number, k: number): number =>
   (wr * games + prior * k) / (games + k)
-const pct = (x: number): string => `${(x * 100).toFixed(1).replace('.', ',')} %`
+const pct = (x: number): string => fmtPct(x, 1)
 
 export function computeDraftAdvice(
   gd: GameData,
@@ -81,32 +82,54 @@ export function computeDraftAdvice(
     const s = stats[c.id]
     const reasons: string[] = []
     let wr = s ? bayes(s.games, s.winRate, 0.5, 60) : 0.5
-    if (s) reasons.push(`${pct(s.winRate)} sur ${s.games.toLocaleString('fr-FR')} parties`)
+    if (s)
+      reasons.push(
+        tr(
+          `${pct(s.winRate)} sur ${fmtNumber(s.games)} parties`,
+          `${pct(s.winRate)} over ${fmtNumber(s.games)} games`
+        )
+      )
     if (enemyJungler && s?.vs[enemyJungler.id]) {
       const [g, vsWr] = s.vs[enemyJungler.id]
       wr = bayes(g, vsWr, wr, 25)
-      if (g >= 8) reasons.push(`${pct(vsWr)} contre ${enemyJungler.name} (${g} parties)`)
+      if (g >= 8)
+        reasons.push(
+          tr(
+            `${pct(vsWr)} contre ${enemyJungler.label} (${g} parties)`,
+            `${pct(vsWr)} vs ${enemyJungler.label} (${g} games)`
+          )
+        )
     }
     let fit = 0
     const p = profileOf(c, catalog.profiles)
     if (allies.length >= 2) {
       if (allyAp < 0.3 && p.ap >= 0.6) {
         fit += 0.012
-        reasons.push('apporte les dégâts magiques qui manquent')
+        reasons.push(
+          tr('apporte les dégâts magiques qui manquent', 'adds the missing magic damage')
+        )
       } else if (allyAp > 0.7 && p.ap <= 0.4) {
         fit += 0.012
-        reasons.push('apporte les dégâts physiques qui manquent')
+        reasons.push(
+          tr('apporte les dégâts physiques qui manquent', 'adds the missing physical damage')
+        )
       } else if ((allyAp < 0.3 && p.ap <= 0.3) || (allyAp > 0.7 && p.ap >= 0.7)) {
         fit -= 0.008
       }
       if (allyFront < 0.6 && p.tank >= 0.6) {
         fit += 0.008
-        reasons.push('ligne de front pour l’équipe')
+        reasons.push(tr('ligne de front pour l’équipe', 'frontline for the team'))
       }
     }
     const mastery = masteryOf.get(c.key) ?? 0
     const comfort = mastery > 0 ? Math.min(0.015, Math.log10(mastery) / 400) : 0
-    if (mastery >= 50000) reasons.push(`${Math.round(mastery / 1000)} k points de maîtrise`)
+    if (mastery >= 50000)
+      reasons.push(
+        tr(
+          `${Math.round(mastery / 1000)} k points de maîtrise`,
+          `${Math.round(mastery / 1000)}k mastery points`
+        )
+      )
     return { champ: c, winRate: wr, score: wr + fit + comfort, reasons, inPool: poolIds.has(c.key) }
   }
 
@@ -135,13 +158,24 @@ export function computeDraftAdvice(
       const presence = Math.sqrt(s.games / totalGames)
       let score = strength * (0.5 + 3 * presence)
       if (strength > 0.01)
-        reasons.push(`${pct(s.winRate)} sur ${s.games.toLocaleString('fr-FR')} parties`)
+        reasons.push(
+          tr(
+            `${pct(s.winRate)} sur ${fmtNumber(s.games)} parties`,
+            `${pct(s.winRate)} over ${fmtNumber(s.games)} games`
+          )
+        )
       myTop.forEach((mine, rank) => {
         const vs = stats[mine.id]?.vs[c.id]
         if (vs && vs[0] >= 8) {
           const delta = 0.5 - bayes(vs[0], vs[1], 0.5, 20)
           score += delta * 0.8 * RANK_WEIGHT[rank]
-          if (vs[1] < 0.46) reasons.push(`bat ${mine.name} (${pct(vs[1])} pour toi)`)
+          if (vs[1] < 0.46)
+            reasons.push(
+              tr(
+                `bat ${mine.label} (${pct(vs[1])} pour toi)`,
+                `beats ${mine.label} (${pct(vs[1])} for you)`
+              )
+            )
         }
       })
       return { champ: c, score, reasons }

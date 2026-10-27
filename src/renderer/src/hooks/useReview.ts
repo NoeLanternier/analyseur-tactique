@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GamePhase, RawPostGame } from '../../../shared/types'
 import type { Catalog } from '../engine/catalog'
 import { champFromLive, type GameData } from '../engine/gameData'
+import { tr, type Lang } from '../../../shared/i18n'
 import { computeLearning, type Learning } from '../engine/learning'
 import {
   analyzeGame,
@@ -54,7 +55,12 @@ function isFacts(x: any): x is GameFacts {
  * Bilans d'après-partie : détection de la fin de partie, récupération dans l'historique du client,
  * enregistrement, analyse de toutes les parties et apprentissage.
  */
-export function useReview(gd: GameData | null, catalog: Catalog, autoReview: boolean): ReviewState {
+export function useReview(
+  gd: GameData | null,
+  catalog: Catalog,
+  autoReview: boolean,
+  lang: Lang
+): ReviewState {
   const [facts, setFacts] = useState<GameFacts[]>([])
   const [status, setStatus] = useState<ReviewStatus>({ state: 'idle' })
   const [fresh, setFresh] = useState<number | null>(null)
@@ -74,14 +80,18 @@ export function useReview(gd: GameData | null, catalog: Catalog, autoReview: boo
   }, [])
 
   const store = useCallback(async (raw: RawPostGame | null): Promise<string> => {
-    if (!raw) return 'partie introuvable dans l’historique du client'
+    if (!raw)
+      return tr(
+        'partie introuvable dans l’historique du client',
+        'game not found in the client history'
+      )
     const data = gdRef.current
     const f = normalizeGame(raw, (rawName, name) =>
       data ? champFromLive(data, rawName, name)?.key : undefined
     )
-    if ('skip' in f) return `partie ignorée : ${f.skip}`
+    if ('skip' in f) return `${tr('partie ignorée', 'game skipped')}: ${f.skip}`
     const res = await window.api.saveReport(f.gameId, f)
-    if (!res.success) return `enregistrement impossible (${res.error})`
+    if (!res.success) return `${tr('enregistrement impossible', 'could not save')} (${res.error})`
     setFacts((prev) =>
       [f, ...prev.filter((x) => x.gameId !== f.gameId)].sort((a, b) => b.createdAt - a.createdAt)
     )
@@ -141,7 +151,10 @@ export function useReview(gd: GameData | null, catalog: Catalog, autoReview: boo
         if (!recent.length) {
           setStatus({
             state: 'info',
-            message: 'Aucune partie dans l’historique (client connecté ?)'
+            message: tr(
+              'Aucune partie dans l’historique (client connecté ?)',
+              'No game in the history (is the client connected?)'
+            )
           })
           return
         }
@@ -180,8 +193,11 @@ export function useReview(gd: GameData | null, catalog: Catalog, autoReview: boo
           setStatus({
             state: 'info',
             message: recent.length
-              ? `${added} partie(s) jungle ajoutée(s) sur ${recent.length} récupérée(s).`
-              : 'Aucune nouvelle partie à importer.'
+              ? tr(
+                  `${added} partie(s) jungle ajoutée(s) sur ${recent.length} récupérée(s).`,
+                  `${added} jungle game(s) added out of ${recent.length} fetched.`
+                )
+              : tr('Aucune nouvelle partie à importer.', 'No new game to import.')
           })
         } catch (e) {
           setStatus({ state: 'error', message: String((e as Error)?.message ?? e) })
@@ -205,7 +221,8 @@ export function useReview(gd: GameData | null, catalog: Catalog, autoReview: boo
       }
     }
     return out
-  }, [gd, catalog, facts])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lang : les textes calculés suivent la langue
+  }, [gd, catalog, facts, lang])
 
   const learning = useMemo(() => computeLearning(reports), [reports])
 

@@ -14,6 +14,7 @@ const api: TactiqueApi = {
   onLcuStatus: (cb) => listen('lcu-status', cb),
   onLiveUpdate: (cb) => listen('live-update', cb),
   onTogglePin: (cb) => listen('toggle-pin', () => cb()),
+  onLangUpdate: (cb) => listen('lang-update', cb),
   getInitialState: () => ipcRenderer.invoke('get-initial-state'),
   applyRunes: (payload) => ipcRenderer.invoke('apply-runes', payload),
   applyItemSet: (payload) => ipcRenderer.invoke('apply-item-set', payload),

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import type { UpdateStatus } from '../shared/types'
 import { debugLog } from './logger'
+import { tr } from '../shared/i18n'
 
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-require-imports */
 
@@ -22,11 +23,15 @@ export function initUpdater(onStatus: (s: UpdateStatus) => void): void {
     status = s
     onStatus(s)
   }
-  if (!app.isPackaged) return set({ state: 'unsupported', message: 'mode développement' })
+  if (!app.isPackaged)
+    return set({ state: 'unsupported', message: tr('mode développement', 'development mode') })
   if (process.env['PORTABLE_EXECUTABLE_FILE']) {
     return set({
       state: 'unsupported',
-      message: 'version portable : utilisez le programme d’installation'
+      message: tr(
+        'version portable : utilisez le programme d’installation',
+        'portable version: use the installer'
+      )
     })
   }
   try {
@@ -34,7 +39,13 @@ export function initUpdater(onStatus: (s: UpdateStatus) => void): void {
     const moduleName = 'electron-updater'
     updater = require(moduleName).autoUpdater
   } catch {
-    return set({ state: 'unsupported', message: 'module electron-updater absent (npm install)' })
+    return set({
+      state: 'unsupported',
+      message: tr(
+        'module electron-updater absent (npm install)',
+        'electron-updater module missing (npm install)'
+      )
+    })
   }
   updater.autoDownload = true
   updater.autoInstallOnAppQuit = true

@@ -21,6 +21,7 @@ import {
   type RunePagePayload
 } from '../shared/types'
 import { debugLog } from './logger'
+import { tr } from '../shared/i18n'
 
 /** Préfixe des pages de runes et sets d'items créés par l'application. */
 export const TACTIQUE_TAG = 'Tactique'
@@ -47,6 +48,8 @@ export class LcuService extends EventEmitter {
   status: LcuStatus = 'disconnected'
   phase: GamePhase = 'None'
   draft: DraftState = EMPTY_DRAFT
+  /** Langue du client League of Legends ("fr_FR", "en_US"...), null si inconnue. */
+  locale: string | null = null
 
   private credentials: Credentials | null = null
   private ws: LeagueWebSocket | null = null
@@ -106,6 +109,16 @@ export class LcuService extends EventEmitter {
   }
 
   private async loadInitialState(): Promise<void> {
+    try {
+      const loc = await this.request<any>('GET', '/riotclient/region-locale')
+      const locale = typeof loc.data?.locale === 'string' ? loc.data.locale : null
+      if (loc.ok && locale && locale !== this.locale) {
+        this.locale = locale
+        this.emit('locale', locale)
+      }
+    } catch (error) {
+      debugLog('lcu', { localeError: String(error) })
+    }
     try {
       const phase = await this.request<string>('GET', '/lol-gameflow/v1/gameflow-phase')
       if (phase.ok && typeof phase.data === 'string') this.setPhase(phase.data)
@@ -171,7 +184,10 @@ export class LcuService extends EventEmitter {
     url: string,
     body?: unknown
   ): Promise<LcuResponse<T>> {
-    if (!this.credentials) throw new Error('Client League of Legends non connecté')
+    if (!this.credentials)
+      throw new Error(
+        tr('Client League of Legends non connecté', 'League of Legends client not connected')
+      )
     const res = await createHttp1Request(
       { method, url, body: body as Record<string, unknown> | undefined },
       this.credentials
@@ -199,13 +215,13 @@ export class LcuService extends EventEmitter {
   async applyRunePage(payload: RunePagePayload, replaceIfFull: boolean): Promise<ActionResult> {
     try {
       if (payload.selectedPerkIds.length !== 9 || !payload.primaryStyleId || !payload.subStyleId) {
-        return { success: false, error: 'Page de runes incomplète' }
+        return { success: false, error: tr('Page de runes incomplète', 'Incomplete rune page') }
       }
       const pagesRes = await this.request<any[]>('GET', '/lol-perks/v1/pages')
       if (!pagesRes.ok || !Array.isArray(pagesRes.data)) {
         return {
           success: false,
-          error: `Lecture des pages impossible (${LcuService.errorMessage(pagesRes)})`
+          error: `${tr('Lecture des pages impossible', 'Cannot read rune pages')} (${LcuService.errorMessage(pagesRes)})`
         }
       }
       const pages = pagesRes.data
@@ -236,12 +252,18 @@ export class LcuService extends EventEmitter {
         if (target) {
           const put = await this.request('PUT', `/lol-perks/v1/pages/${target.id}`, body)
           if (put.ok) return { success: true }
-          return { success: false, error: `Remplacement refusé (${LcuService.errorMessage(put)})` }
+          return {
+            success: false,
+            error: `${tr('Remplacement refusé', 'Replacement refused')} (${LcuService.errorMessage(put)})`
+          }
         }
       }
       return {
         success: false,
-        error: `Création refusée (${LcuService.errorMessage(post)}). Libère une page de runes ou active « Remplacer la page active ».`
+        error: tr(
+          `Création refusée (${LcuService.errorMessage(post)}). Libère une page de runes ou active « Remplacer la page active ».`,
+          `Creation refused (${LcuService.errorMessage(post)}). Free a rune page or enable “Replace the active page”.`
+        )
       }
     } catch (error) {
       return { success: false, error: String((error as Error)?.message ?? error) }
@@ -332,7 +354,7 @@ export class LcuService extends EventEmitter {
     try {
       const summoner = await this.request<any>('GET', '/lol-summoner/v1/current-summoner')
       if (!summoner.ok || !summoner.data?.summonerId) {
-        return { success: false, error: 'Invocateur introuvable' }
+        return { success: false, error: tr('Invocateur introuvable', 'Summoner not found') }
       }
       const { summonerId, accountId } = summoner.data
       const url = `/lol-item-sets/v1/item-sets/${summonerId}/sets`
@@ -340,7 +362,7 @@ export class LcuService extends EventEmitter {
       if (!current.ok) {
         return {
           success: false,
-          error: `Lecture des sets impossible (${LcuService.errorMessage(current)})`
+          error: `${tr('Lecture des sets impossible', 'Cannot read item sets')} (${LcuService.errorMessage(current)})`
         }
       }
       const existing: any[] = Array.isArray(current.data?.itemSets) ? current.data.itemSets : []
@@ -371,7 +393,11 @@ export class LcuService extends EventEmitter {
         itemSets: [...kept, newSet],
         timestamp: Date.now()
       })
-      if (!put.ok) return { success: false, error: `Set refusé (${LcuService.errorMessage(put)})` }
+      if (!put.ok)
+        return {
+          success: false,
+          error: `${tr('Set refusé', 'Item set refused')} (${LcuService.errorMessage(put)})`
+        }
       return { success: true }
     } catch (error) {
       return { success: false, error: String((error as Error)?.message ?? error) }

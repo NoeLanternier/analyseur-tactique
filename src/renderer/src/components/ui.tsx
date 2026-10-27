@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from 'react'
 import { itemIcon, runeIcon, type ItemInfo, type RuneInfo } from '../engine/gameData'
+import { gold } from '../../../shared/i18n'
 
 export function Card({
   title,
@@ -65,8 +66,8 @@ export function ItemIcon({
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <img
         src={itemIcon(version, item.id)}
-        alt={item.nameFr}
-        title={title ?? `${item.nameFr} — ${item.total} po`}
+        alt={item.label}
+        title={title ?? `${item.label} — ${gold(item.total)}`}
         width={size}
         height={size}
         className={`rounded border ${highlight ? 'border-lolblue shadow-[0_0_8px_rgba(10,200,185,0.6)]' : 'border-gold/60'} ${owned ? 'opacity-40 grayscale' : ''}`}
@@ -92,8 +93,8 @@ export function RuneIcon({
   return (
     <img
       src={runeIcon(rune.icon)}
-      alt={rune.nameFr}
-      title={rune.nameFr}
+      alt={rune.label}
+      title={rune.label}
       width={size}
       height={size}
       className={keystone ? 'rounded-full bg-black/40' : 'rounded-full bg-black/30 p-0.5'}

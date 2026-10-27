@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { ActionResult } from '../shared/types'
 import { debugLog } from './logger'
+import { tr } from '../shared/i18n'
 
 // Bilans d'après-partie : un petit fichier JSON par partie dans le dossier de données de l'app.
 // On garde les données compactes de la partie (pas l'analyse) : quand le moteur d'analyse
@@ -16,7 +17,8 @@ export function reportsDir(): string {
 
 export function saveReport(gameId: number, facts: unknown): ActionResult {
   try {
-    if (!Number.isFinite(gameId) || gameId <= 0) return { success: false, error: 'Partie invalide' }
+    if (!Number.isFinite(gameId) || gameId <= 0)
+      return { success: false, error: tr('Partie invalide', 'Invalid game') }
     const dir = reportsDir()
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, `${Math.floor(gameId)}.json`), JSON.stringify(facts))

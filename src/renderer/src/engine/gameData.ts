@@ -1,3 +1,4 @@
+import { getLang, tr } from '../../../shared/i18n'
 import { norm } from './normalize'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -11,8 +12,11 @@ const DDRAGON = 'https://ddragon.leagueoflegends.com'
 export interface ChampInfo {
   key: number
   id: string
+  /** Nom français (utilisé aussi pour retrouver le champion). */
   name: string
   nameEn: string
+  /** Nom affiché dans la langue de l'application. */
+  readonly label: string
   tags: string[]
   info: { attack: number; defense: number; magic: number }
 }
@@ -22,6 +26,8 @@ export interface RuneInfo {
   key: string
   name: string
   nameFr: string
+  /** Nom affiché dans la langue de l'application. */
+  readonly label: string
   icon: string
   treeId: number
   /** 0 = clé de voûte, 1..3 = lignes suivantes. */
@@ -33,14 +39,18 @@ export interface RuneTree {
   key: string
   name: string
   nameFr: string
+  readonly label: string
   icon: string
   slots: RuneInfo[][]
 }
 
 export interface ItemInfo {
   id: number
+  /** Nom anglais officiel (sert d'identifiant dans les données de build). */
   name: string
   nameFr: string
+  /** Nom affiché dans la langue de l'application. */
+  readonly label: string
   total: number
   from: number[]
   into: number[]
@@ -88,6 +98,9 @@ export function buildGameData(raw: RawGameData): GameData {
       id: c.id,
       name: c.name,
       nameEn: enById[c.id]?.name ?? c.name,
+      get label() {
+        return getLang() === 'en' ? this.nameEn : this.name
+      },
       tags: Array.isArray(c.tags) ? c.tags : [],
       info: {
         attack: Number(c.info?.attack ?? 5),
@@ -116,6 +129,9 @@ export function buildGameData(raw: RawGameData): GameData {
       key: tree.key,
       name: tree.name,
       nameFr: frTree.get(tree.id) ?? tree.name,
+      get label() {
+        return getLang() === 'en' ? this.name : this.nameFr
+      },
       icon: tree.icon,
       slots: []
     }
@@ -125,6 +141,9 @@ export function buildGameData(raw: RawGameData): GameData {
         key: r.key,
         name: r.name,
         nameFr: frRune.get(r.id) ?? r.name,
+        get label() {
+          return getLang() === 'en' ? this.name : this.nameFr
+        },
         icon: r.icon,
         treeId: tree.id,
         row
@@ -157,6 +176,9 @@ export function buildGameData(raw: RawGameData): GameData {
       id,
       name: it.name,
       nameFr: frItems[idStr]?.name ?? it.name,
+      get label() {
+        return getLang() === 'en' ? this.name : this.nameFr
+      },
       total,
       from: Array.isArray(it.from) ? it.from.map(Number) : [],
       into,
@@ -200,7 +222,7 @@ export function buildGameData(raw: RawGameData): GameData {
 
 async function getJson(url: string): Promise<any> {
   const res = await fetch(url)
-  if (!res.ok) throw new Error(`${res.status} sur ${url}`)
+  if (!res.ok) throw new Error(`${res.status} ${tr('sur', 'on')} ${url}`)
   return res.json()
 }
 

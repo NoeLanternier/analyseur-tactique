@@ -16,6 +16,7 @@ import { BuildTab } from './components/BuildTab'
 import { AnalysisTab } from './components/AnalysisTab'
 import { SettingsTab } from './components/SettingsTab'
 import { ReviewTab } from './components/ReviewTab'
+import { tr } from '../../shared/i18n'
 
 type Tab = 'build' | 'analyse' | 'review' | 'settings'
 
@@ -28,6 +29,11 @@ export default function App(): ReactElement {
   const expanded = hovered || pinned
 
   useEffect(() => window.api.onTogglePin(() => setPinned((p) => !p)), [])
+
+  // Titre de la fenêtre (barre des tâches) dans la langue de l'application.
+  useEffect(() => {
+    document.title = tr('Analyseur Tactique', 'Tactical Analyzer')
+  }, [t.lang])
 
   // Le panneau ouvert capte la souris ; fermé, les clics traversent vers le jeu.
   useEffect(() => {
@@ -78,9 +84,9 @@ export default function App(): ReactElement {
 
   const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
     { id: 'build', label: 'Build', icon: <Swords size={13} /> },
-    { id: 'analyse', label: 'Analyse', icon: <Gauge size={13} /> },
-    { id: 'review', label: 'Bilan', icon: <ClipboardCheck size={13} /> },
-    { id: 'settings', label: 'Réglages', icon: <Settings size={13} /> }
+    { id: 'analyse', label: tr('Analyse', 'Analysis'), icon: <Gauge size={13} /> },
+    { id: 'review', label: tr('Bilan', 'Review'), icon: <ClipboardCheck size={13} /> },
+    { id: 'settings', label: tr('Réglages', 'Settings'), icon: <Settings size={13} /> }
   ]
 
   return (
@@ -92,23 +98,23 @@ export default function App(): ReactElement {
       >
         <header className="flex h-11 shrink-0 items-center justify-between bg-[#0a0d14] px-3">
           <span className="flex items-center gap-2 font-cinzel text-sm font-bold tracking-widest text-gold">
-            <Zap size={14} className={t.champ ? 'text-lolblue' : 'text-slate-600'} /> Analyseur
-            Tactique
+            <Zap size={14} className={t.champ ? 'text-lolblue' : 'text-slate-600'} />{' '}
+            {tr('Analyseur Tactique', 'Tactical Analyzer')}
           </span>
           <div className="flex items-center gap-2">
             <span
-              title={`Client LoL : ${t.lcuStatus}`}
+              title={`${tr('Client LoL', 'LoL client')}: ${t.lcuStatus}`}
               className={`h-2 w-2 rounded-full ${t.lcuStatus === 'connected' ? 'bg-emerald-400' : t.lcuStatus === 'connecting' ? 'bg-amber-400' : 'bg-slate-600'}`}
             />
             <button
-              title="Épingler (Ctrl+Maj+T)"
+              title={tr('Épingler (Ctrl+Maj+T)', 'Pin (Ctrl+Shift+T)')}
               onClick={() => setPinned(!pinned)}
               className="text-slate-400 hover:text-lolblue"
             >
               {pinned ? <PinOff size={15} /> : <Pin size={15} />}
             </button>
             <button
-              title="Quitter"
+              title={tr('Quitter', 'Quit')}
               onClick={() => window.api.closeApp()}
               className="text-slate-400 hover:text-red-500"
             >
@@ -142,10 +148,10 @@ export default function App(): ReactElement {
           {!t.gd && (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-sm text-slate-400">
               <LoaderCircle className="animate-spin text-gold" />
-              Chargement des données Riot…
+              {tr('Chargement des données Riot…', 'Loading Riot data…')}
               {t.loadError && (
                 <span className="text-[11px] text-red-300">
-                  {t.loadError} — nouvel essai dans 10 s
+                  {t.loadError} — {tr('nouvel essai dans 10 s', 'retrying in 10 s')}
                 </span>
               )}
             </div>

@@ -9,6 +9,7 @@ import { checkForUpdates, getUpdateStatus, initUpdater, installUpdate } from './
 import { listReports, reportsDir, saveReport } from './reports'
 import * as fs from 'fs'
 import { JournalRecorder } from './journal'
+import { langFromLocale, setLang, tr, type Lang } from '../shared/i18n'
 import type { ItemSetPayload, RawPostGame, RunePagePayload, Settings } from '../shared/types'
 
 // Plus de "ignore-certificate-errors" : l'API en jeu est vérifiée avec le certificat Riot (live.ts).
@@ -33,6 +34,20 @@ function applyLoginItem(enabled: boolean): void {
 }
 
 const lcu = new LcuService()
+
+/** Langue effective : réglage, ou en mode auto la langue du client LoL (sinon celle du système). */
+let lang: Lang = 'fr'
+function updateLang(): void {
+  const next =
+    settings.language === 'auto'
+      ? langFromLocale(lcu.locale ?? (app.isReady() ? app.getLocale() : 'fr'))
+      : settings.language
+  setLang(next)
+  if (next !== lang) {
+    lang = next
+    send('lang-update', next)
+  }
+}
 let journal: JournalRecorder
 const live = new LivePoller(() => ['GameStart', 'InProgress', 'Reconnect'].includes(lcu.phase))
 
@@ -90,6 +105,7 @@ function createWindow(): void {
 
 function registerIpc(): void {
   ipcMain.handle('get-initial-state', () => ({
+    lang,
     status: lcu.status,
     phase: lcu.phase,
     draft: lcu.draft
@@ -118,6 +134,7 @@ function registerIpc(): void {
     const previousStartup = settings.launchAtStartup
     settings = saveSettings(next)
     setDebug(settings.debug)
+    updateLang()
     if (settings.launchAtStartup !== previousStartup) applyLoginItem(settings.launchAtStartup)
     if (mainWindow && settings.side !== previousSide)
       mainWindow.setBounds(windowBounds(settings.side))
@@ -125,7 +142,8 @@ function registerIpc(): void {
   })
 
   ipcMain.handle('fetch-meta-override', async (_e, url: string) => {
-    if (!/^https:\/\//i.test(url)) return { ok: false, error: 'URL https:// requise' }
+    if (!/^https:\/\//i.test(url))
+      return { ok: false, error: tr('URL https:// requise', 'https:// URL required') }
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 8000)
     try {
@@ -176,12 +194,14 @@ app.whenReady().then(() => {
   app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 
   journal = new JournalRecorder()
+  updateLang()
   registerIpc()
   createWindow()
 
   lcu.on('status', (s) => send('lcu-status', s))
   lcu.on('phase', (p) => send('lcu-phase-update', p))
   lcu.on('draft', (d) => send('lcu-draft-update', d))
+  lcu.on('locale', () => updateLang())
   live.on('update', (d) => {
     journal.update(d)
     send('live-update', d)

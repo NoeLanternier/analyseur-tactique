@@ -10,6 +10,7 @@ import type { ChampInfo, GameData } from './gameData'
 import { norm } from './normalize'
 import { resolveSpec } from './runes'
 import { profileOf, type MeasuredProfiles } from './threat'
+import { tr } from '../../../shared/i18n'
 
 // Catalogue des builds : base tactique + mise à jour distante éventuelle + build générique pour
 // tout champion absent de la base (nouveau champion, pick original...).
@@ -359,13 +360,18 @@ export interface ValidationReport {
 export function validateCatalog(gd: GameData, catalog: Catalog): ValidationReport {
   const issues: string[] = []
   for (const b of catalog.builds.values()) {
-    if (!gd.championsById.has(b.id)) issues.push(`${b.id} : champion inconnu`)
+    if (!gd.championsById.has(b.id))
+      issues.push(`${b.id}: ${tr('champion inconnu', 'unknown champion')}`)
     const runes = resolveSpec(gd, b.runes)
-    if (!runes) issues.push(`${b.id} : page de runes invalide (${b.runes.keystone})`)
+    if (!runes)
+      issues.push(
+        `${b.id}: ${tr('page de runes invalide', 'invalid rune page')} (${b.runes.keystone})`
+      )
     else if (runes.repairs.length)
-      issues.push(`${b.id} : runes corrigées (${runes.repairs.join(', ')})`)
+      issues.push(`${b.id}: ${tr('runes corrigées', 'runes fixed')} (${runes.repairs.join(', ')})`)
     for (const name of [b.pet, b.boots, ...b.core, ...b.options]) {
-      if (!gd.itemsByName.has(norm(name))) issues.push(`${b.id} : objet introuvable « ${name} »`)
+      if (!gd.itemsByName.has(norm(name)))
+        issues.push(`${b.id}: ${tr('objet introuvable', 'item not found')} “${name}”`)
     }
   }
   return { checkedBuilds: catalog.builds.size, issues }

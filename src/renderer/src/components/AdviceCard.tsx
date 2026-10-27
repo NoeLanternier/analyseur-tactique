@@ -3,8 +3,9 @@ import type { ReactElement } from 'react'
 import type { TactiqueState } from '../hooks/useTactique'
 import { champIcon } from '../engine/gameData'
 import { Card, Chip } from './ui'
+import { fmtPct, tr } from '../../../shared/i18n'
 
-const pct = (x: number): string => `${(x * 100).toFixed(1).replace('.', ',')} %`
+const pct = (x: number): string => fmtPct(x, 1)
 
 /** Conseils de pick et de ban pendant la sélection des champions. */
 export function AdviceCard({ t }: { t: TactiqueState }): ReactElement | null {
@@ -20,8 +21,12 @@ export function AdviceCard({ t }: { t: TactiqueState }): ReactElement | null {
     <div className="flex flex-col gap-3">
       {showBans && advice.bans.length > 0 && (
         <Card
-          title="Bans conseillés"
-          right={draft.banTurn ? <Chip tone="red">à toi de bannir</Chip> : undefined}
+          title={tr('Bans conseillés', 'Suggested bans')}
+          right={
+            draft.banTurn ? (
+              <Chip tone="red">{tr('à toi de bannir', 'your turn to ban')}</Chip>
+            ) : undefined
+          }
         >
           <ul className="flex flex-col gap-2">
             {advice.bans.map((b) => (
@@ -29,9 +34,10 @@ export function AdviceCard({ t }: { t: TactiqueState }): ReactElement | null {
                 <Ban size={13} className="shrink-0 text-red-400" />
                 <img src={champIcon(v, b.champ.id)} alt="" className="h-7 w-7 rounded" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs text-slate-100">{b.champ.name}</div>
+                  <div className="truncate text-xs text-slate-100">{b.champ.label}</div>
                   <div className="truncate text-[10px] text-slate-400">
-                    {b.reasons.join(' · ') || 'jungler fort du patch'}
+                    {b.reasons.join(' · ') ||
+                      tr('jungler fort du patch', 'strong jungler this patch')}
                   </div>
                 </div>
               </li>
@@ -42,12 +48,12 @@ export function AdviceCard({ t }: { t: TactiqueState }): ReactElement | null {
 
       {advice.picks.length > 0 && (
         <Card
-          title="Conseils de pick"
+          title={tr('Conseils de pick', 'Pick suggestions')}
           right={
             advice.enemyJungler ? (
-              <span className="text-[10px] text-slate-400">vs {advice.enemyJungler.name}</span>
+              <span className="text-[10px] text-slate-400">vs {advice.enemyJungler.label}</span>
             ) : draft.pickTurn ? (
-              <Chip tone="blue">à toi de choisir</Chip>
+              <Chip tone="blue">{tr('à toi de choisir', 'your turn to pick')}</Chip>
             ) : undefined
           }
         >
@@ -62,11 +68,11 @@ export function AdviceCard({ t }: { t: TactiqueState }): ReactElement | null {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate text-xs font-semibold text-slate-100">
-                      {p.champ.name}
+                      {p.champ.label}
                     </span>
                     {!p.inPool && (
                       <span className="flex items-center gap-0.5 text-[9px] text-gold">
-                        <Sparkles size={10} /> hors de tes champions
+                        <Sparkles size={10} /> {tr('hors de tes champions', 'outside your pool')}
                       </span>
                     )}
                   </div>
@@ -84,7 +90,10 @@ export function AdviceCard({ t }: { t: TactiqueState }): ReactElement | null {
           </ul>
           {noStats && (
             <p className="mt-2 text-[10px] leading-snug text-slate-500">
-              Branche la méta distante (Réglages) pour des conseils basés sur les parties Master+.
+              {tr(
+                'Branche la méta distante (Réglages) pour des conseils basés sur les parties Master+.',
+                'Set up the remote meta (Settings) for advice based on Master+ games.'
+              )}
             </p>
           )}
         </Card>

@@ -3,6 +3,7 @@ import type { JunglerBuild, RuneSpec } from '../data/junglers'
 import type { GameData, RuneInfo, RuneTree } from './gameData'
 import { norm } from './normalize'
 import type { ThreatProfile } from './threat'
+import { tr } from '../../../shared/i18n'
 
 // Fragments de runes (identifiants fixes, absents de runesReforged.json).
 export const SHARDS = {
@@ -22,14 +23,20 @@ const SHARD_ROWS = [
   [5008, 5010, 5001],
   [5011, 5013, 5001]
 ]
-export const SHARD_NAMES: Record<number, string> = {
-  5008: 'Force adaptative',
-  5005: "Vitesse d'attaque",
-  5007: 'Accélération de compétence',
-  5010: 'Vitesse de déplacement',
-  5001: 'PV évolutifs',
-  5011: 'PV',
-  5013: 'Ténacité et résistance aux ralentissements'
+const SHARD_NAMES: Record<number, [string, string]> = {
+  5008: ['Force adaptative', 'Adaptive Force'],
+  5005: ["Vitesse d'attaque", 'Attack Speed'],
+  5007: ['Accélération de compétence', 'Ability Haste'],
+  5010: ['Vitesse de déplacement', 'Move Speed'],
+  5001: ['PV évolutifs', 'Health Scaling'],
+  5011: ['PV', 'Health'],
+  5013: ['Ténacité et résistance aux ralentissements', 'Tenacity and Slow Resist']
+}
+
+/** Nom d'un fragment de rune dans la langue de l'application. */
+export function shardName(id: number): string {
+  const n = SHARD_NAMES[id]
+  return n ? tr(n[0], n[1]) : String(id)
 }
 
 export interface ResolvedRunePage {
@@ -88,7 +95,7 @@ export function resolveSpec(
     if (usedRows.has(row) || !sub.slots[row]?.[0]) continue
     usedRows.add(row)
     runes.push(sub.slots[row][0])
-    repairs.push(`secondaire → ${sub.slots[row][0].name}`)
+    repairs.push(`${tr('secondaire', 'secondary')} → ${sub.slots[row][0].name}`)
   }
   if (runes.length !== 6) return null
 
@@ -165,10 +172,19 @@ export function buildRunePage(
 
   const base = chosen === 'tactique' ? tactique! : riot!
   if (chosen === 'tactique')
-    reasons.push(upToDate ? `Méta patch ${metaPatch}` : `Base patch ${metaPatch}`)
-  else reasons.push(`Recommandation Riot (patch ${gd.version.split('.').slice(0, 2).join('.')})`)
+    reasons.push(
+      upToDate
+        ? `${tr('Méta', 'Meta')} patch ${metaPatch}`
+        : `${tr('Base', 'Database')} patch ${metaPatch}`
+    )
+  else
+    reasons.push(
+      `${tr('Recommandation Riot', 'Riot recommendation')} (patch ${gd.version.split('.').slice(0, 2).join('.')})`
+    )
   if (chosen === 'riot' && riotSorted.length > 1)
-    reasons.push(`Clé de voûte choisie selon la composition adverse`)
+    reasons.push(
+      tr('Clé de voûte choisie selon la composition adverse', 'Keystone picked for the enemy team')
+    )
 
   // Adaptation des fragments.
   const shards = [...base.shards]
@@ -177,10 +193,20 @@ export function buildRunePage(
   if (threat.enemies.length > 0) {
     if (m.cc >= 0.6 && shards[2] !== SHARDS.tenacity) {
       shards[2] = SHARDS.tenacity
-      reasons.push('Fragment ténacité : beaucoup de contrôles adverses')
+      reasons.push(
+        tr(
+          'Fragment ténacité : beaucoup de contrôles adverses',
+          'Tenacity shard: lots of enemy crowd control'
+        )
+      )
     } else if (m.burst >= 0.6 && !isTank && shards[2] === SHARDS.healthScaling) {
       shards[2] = SHARDS.health
-      reasons.push('Fragment PV : dégâts explosifs adverses en début de partie')
+      reasons.push(
+        tr(
+          'Fragment PV : dégâts explosifs adverses en début de partie',
+          'Health shard: heavy enemy early burst'
+        )
+      )
     }
   }
   // Sécurité : chaque fragment doit appartenir à sa ligne.

@@ -3,6 +3,7 @@ import type { Metric } from '../data/items'
 import type { LiveGameData, LivePlayer } from '../../../shared/types'
 import { champFromLive, inventoryValue, type ChampInfo, type GameData } from './gameData'
 import { clamp01 } from './normalize'
+import { fmtPct, gold, tr } from '../../../shared/i18n'
 
 /** Profil mesuré dans les vraies parties (méta distante) : rangs centiles entre 0 et 1. */
 export interface MeasuredProfile {
@@ -276,7 +277,10 @@ export function analyzeThreat(
       metrics.fedAp = clamp01(fedness * top.ap * 1.3)
       metrics.fedAd = clamp01(fedness * (1 - top.ap) * 1.3)
       notes.push(
-        `${top.champ.name} a pris de l'avance (${top.kda}, ${Math.round(top.itemGold)} po d'objets) — dégâts ${top.ap >= 0.5 ? 'magiques' : 'physiques'}.`
+        tr(
+          `${top.champ.label} a pris de l'avance (${top.kda}, ${gold(top.itemGold)} d'objets) — dégâts ${top.ap >= 0.5 ? 'magiques' : 'physiques'}.`,
+          `${top.champ.label} is ahead (${top.kda}, ${gold(top.itemGold)} of items) — ${top.ap >= 0.5 ? 'magic' : 'physical'} damage.`
+        )
       )
     }
     const allyGold = livePlayers.allies.reduce((s, p) => s + inventoryValue(gd, p.items), 0)
@@ -286,22 +290,65 @@ export function analyzeThreat(
     metrics.ahead = clamp01(rel / 0.25)
     metrics.behind = clamp01(-rel / 0.25)
     if (metrics.ahead > 0.5)
-      notes.push(`Votre équipe mène (+${Math.round(goldDiff)} po) : build plus offensif.`)
+      notes.push(
+        tr(
+          `Votre équipe mène (+${gold(goldDiff)}) : build plus offensif.`,
+          `Your team is ahead (+${gold(goldDiff)}): more offensive build.`
+        )
+      )
     if (metrics.behind > 0.5)
-      notes.push(`Votre équipe est en retard (${Math.round(goldDiff)} po) : survie prioritaire.`)
+      notes.push(
+        tr(
+          `Votre équipe est en retard (${gold(goldDiff)}) : survie prioritaire.`,
+          `Your team is behind (${gold(goldDiff)}): survival first.`
+        )
+      )
   }
 
   if (n > 0) {
     if (metrics.ap >= 0.62)
-      notes.push(`Dégâts adverses surtout magiques (${Math.round(metrics.ap * 100)} %).`)
+      notes.push(
+        tr(
+          `Dégâts adverses surtout magiques (${fmtPct(metrics.ap)}).`,
+          `Mostly magic enemy damage (${fmtPct(metrics.ap)}).`
+        )
+      )
     else if (metrics.ad >= 0.62)
-      notes.push(`Dégâts adverses surtout physiques (${Math.round(metrics.ad * 100)} %).`)
-    else notes.push('Dégâts adverses mixtes.')
+      notes.push(
+        tr(
+          `Dégâts adverses surtout physiques (${fmtPct(metrics.ad)}).`,
+          `Mostly physical enemy damage (${fmtPct(metrics.ad)}).`
+        )
+      )
+    else notes.push(tr('Dégâts adverses mixtes.', 'Mixed enemy damage.'))
     if (metrics.tanky >= 0.5)
-      notes.push('Équipe adverse résistante : pénétration et dégâts sur la durée.')
-    if (metrics.cc >= 0.6) notes.push('Beaucoup de contrôles adverses : ténacité utile.')
-    if (metrics.heal >= 0.5) notes.push('Soins adverses importants : anti-soins conseillés.')
-    if (metrics.burst >= 0.6) notes.push('Dégâts explosifs adverses : objets de survie conseillés.')
+      notes.push(
+        tr(
+          'Équipe adverse résistante : pénétration et dégâts sur la durée.',
+          'Tanky enemy team: penetration and sustained damage.'
+        )
+      )
+    if (metrics.cc >= 0.6)
+      notes.push(
+        tr(
+          'Beaucoup de contrôles adverses : ténacité utile.',
+          'Lots of enemy crowd control: tenacity helps.'
+        )
+      )
+    if (metrics.heal >= 0.5)
+      notes.push(
+        tr(
+          'Soins adverses importants : anti-soins conseillés.',
+          'Strong enemy healing: anti-heal advised.'
+        )
+      )
+    if (metrics.burst >= 0.6)
+      notes.push(
+        tr(
+          'Dégâts explosifs adverses : objets de survie conseillés.',
+          'Heavy enemy burst: defensive items advised.'
+        )
+      )
   }
 
   // Composition alliée (information).
@@ -314,8 +361,20 @@ export function analyzeThreat(
   if (allyChamps.length >= 2) {
     const allyAp = allyChamps.reduce((s, c) => s + profileOf(c, measured).ap, 0) / allyChamps.length
     allyDamage = { ap: allyAp, ad: 1 - allyAp }
-    if (allyAp < 0.25) notes.push('Alliés très AD : vos dégâts magiques sont précieux.')
-    if (allyAp > 0.75) notes.push('Alliés très AP : vos dégâts physiques sont précieux.')
+    if (allyAp < 0.25)
+      notes.push(
+        tr(
+          'Alliés très AD : vos dégâts magiques sont précieux.',
+          'Very AD allies: your magic damage matters.'
+        )
+      )
+    if (allyAp > 0.75)
+      notes.push(
+        tr(
+          'Alliés très AP : vos dégâts physiques sont précieux.',
+          'Very AP allies: your physical damage matters.'
+        )
+      )
   }
 
   return { metrics, enemies, fed, notes, allyDamage, live: livePlayers !== null, goldDiff }

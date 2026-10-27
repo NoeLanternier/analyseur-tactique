@@ -13,6 +13,7 @@ import type { JunglerBuild, SituationContext } from '../data/junglers'
 import type { GameData, ItemInfo } from './gameData'
 import { clamp01, norm } from './normalize'
 import type { ThreatProfile } from './threat'
+import { fmtPct, tr } from '../../../shared/i18n'
 
 export type StepKind = 'starter' | 'core' | 'boots' | 'antiheal' | 'situational' | 'owned'
 
@@ -61,21 +62,25 @@ function conflicts(a: ItemInfo, b: ItemInfo): boolean {
   return ga.some((g) => gb.includes(g))
 }
 
-const METRIC_LABEL: Partial<Record<Metric, string>> = {
-  ap: 'dégâts magiques',
-  ad: 'dégâts physiques',
-  mixed: 'dégâts mixtes',
-  tanky: 'adversaires résistants',
-  armorStack: 'armure adverse',
-  mrStack: 'RM adverse',
-  cc: 'contrôles',
-  heal: 'anti-soins',
-  shield: 'boucliers',
-  burst: 'burst adverse',
-  crit: 'critiques adverses',
-  aa: 'attaques de base',
-  ahead: 'avance',
-  behind: 'retard'
+const METRIC_LABEL: Partial<Record<Metric, [string, string]>> = {
+  ap: ['dégâts magiques', 'magic damage'],
+  ad: ['dégâts physiques', 'physical damage'],
+  mixed: ['dégâts mixtes', 'mixed damage'],
+  tanky: ['adversaires résistants', 'tanky enemies'],
+  armorStack: ['armure adverse', 'enemy armor'],
+  mrStack: ['RM adverse', 'enemy MR'],
+  cc: ['contrôles', 'crowd control'],
+  heal: ['anti-soins', 'anti-heal'],
+  shield: ['boucliers', 'shields'],
+  burst: ['burst adverse', 'enemy burst'],
+  crit: ['critiques adverses', 'enemy crits'],
+  aa: ['attaques de base', 'auto attacks'],
+  ahead: ['avance', 'ahead'],
+  behind: ['retard', 'behind']
+}
+const metricLabel = (m: Metric): string | undefined => {
+  const l = METRIC_LABEL[m]
+  return l ? tr(l[0], l[1]) : undefined
 }
 
 interface Scored {
@@ -85,13 +90,13 @@ interface Scored {
   defensive: boolean
 }
 
-const CONTEXT_LABEL: Record<SituationContext, string> = {
-  all: 'meilleur taux',
-  ap: 'gagne vs AP',
-  ad: 'gagne vs AD',
-  heal: 'gagne vs soins',
-  tank: 'gagne vs tanks',
-  cc: 'gagne vs contrôles'
+const CONTEXT_LABEL: Record<SituationContext, [string, string]> = {
+  all: ['meilleur taux', 'best win rate'],
+  ap: ['gagne vs AP', 'wins vs AP'],
+  ad: ['gagne vs AD', 'wins vs AD'],
+  heal: ['gagne vs soins', 'wins vs healing'],
+  tank: ['gagne vs tanks', 'wins vs tanks'],
+  cc: ['gagne vs contrôles', 'wins vs CC']
 }
 
 /** Poids de chaque contexte mesuré selon la composition adverse actuelle. */
@@ -134,9 +139,7 @@ function dataScore(
     }
   }
   if (weightSum === 0) return null
-  const reason = best
-    ? `${CONTEXT_LABEL[best.ctx]} (+${(best.lift * 100).toFixed(1).replace('.', ',')} %)`
-    : undefined
+  const reason = best ? `${tr(...CONTEXT_LABEL[best.ctx])} (+${fmtPct(best.lift, 1)})` : undefined
   return { score: sum / weightSum, reason }
 }
 
@@ -183,9 +186,9 @@ function scoreItem(
 
   let reason: string | undefined
   if (bestMetric && bestContribution >= 0.3) {
-    reason = METRIC_LABEL[bestMetric]
+    reason = metricLabel(bestMetric)
     if ((bestMetric === 'fedAp' || bestMetric === 'fedAd') && threat.fed)
-      reason = `vs ${threat.fed.champ.name}`
+      reason = `vs ${threat.fed.champ.label}`
   }
   if (learned?.reason && !(reason && reason.startsWith('vs '))) reason = learned.reason
   // Vos résultats avec cet objet (bonus ou malus limité : les règles et la méta restent la base).
@@ -219,9 +222,19 @@ function chooseBoots(
   const threshold = defaultIsDefensive ? 0 : 1.0
   if (!canSwap) return { item: defaultBoots }
   if (mercNeed > steelNeed && mercNeed >= threshold && merc)
-    return { item: merc, reason: m.cc >= 0.6 ? 'contrôles + magie' : 'dégâts magiques' }
+    return {
+      item: merc,
+      reason:
+        m.cc >= 0.6 ? tr('contrôles + magie', 'CC + magic') : tr('dégâts magiques', 'magic damage')
+    }
   if (steelNeed >= mercNeed && steelNeed >= threshold && steel)
-    return { item: steel, reason: m.aa >= 0.5 ? 'attaques de base' : 'dégâts physiques' }
+    return {
+      item: steel,
+      reason:
+        m.aa >= 0.5
+          ? tr('attaques de base', 'auto attacks')
+          : tr('dégâts physiques', 'physical damage')
+    }
   return { item: defaultBoots }
 }
 
@@ -355,7 +368,7 @@ export function buildItemPlan(
       const started = startedComponents.find((c) => buildsFrom(gd, it, c.id))
       if (started) {
         sc.score += 0.5
-        sc.reason = `termine ${started.nameFr}`
+        sc.reason = `${tr('termine', 'completes')} ${started.label}`
       }
       return sc
     })
@@ -393,7 +406,13 @@ export function buildItemPlan(
   const steps: BuildStep[] = []
   // Familier de jungle : premier achat de la partie.
   const pet = gd.itemsByName.get(norm(build.pet))
-  if (pet) steps.push({ item: pet, kind: 'starter', owned: false, reason: 'familier de jungle' })
+  if (pet)
+    steps.push({
+      item: pet,
+      kind: 'starter',
+      owned: false,
+      reason: tr('familier de jungle', 'jungle pet')
+    })
   if (coreSteps[0]) steps.push(coreSteps[0])
   if (ownedBoots) steps.push({ item: ownedBoots, kind: 'boots', owned: true })
   else if (boots.item)
@@ -425,7 +444,7 @@ export function buildItemPlan(
   const ownsGrievousLegendary = ownedLegendaries.some((i) => i.grievous)
   const ownedGrievousComp = ownedItems.find((i) => i.grievous && !i.isLegendary)
   let antiHealTarget: ItemInfo | undefined
-  let antiHealReason = 'anti-soins'
+  let antiHealReason = tr('anti-soins', 'anti-heal')
   if (!ownsGrievousLegendary && ownedGrievousComp) {
     const completions = [...gd.items.values()].filter(
       (i) =>
@@ -438,7 +457,7 @@ export function buildItemPlan(
       completions.find((i) => plannedLegendaries().some((p) => p.id === i.id)) ??
       completions.find((i) => norm(i.name) === norm(ANTI_HEAL[build.archetype].final)) ??
       completions[0]
-    antiHealReason = `termine ${ownedGrievousComp.nameFr}`
+    antiHealReason = `${tr('termine', 'completes')} ${ownedGrievousComp.label}`
   } else if (
     !ownsGrievousLegendary &&
     m.heal >= 0.55 &&
@@ -488,7 +507,7 @@ export function buildItemPlan(
         item: comp,
         kind: 'antiheal',
         owned: false,
-        reason: `anti-soins tôt → ${plannedAntiHeal.nameFr}`
+        reason: `${tr('anti-soins tôt', 'early anti-heal')} → ${plannedAntiHeal.label}`
       })
     }
   }
@@ -507,7 +526,12 @@ export function buildItemPlan(
     let lastSit = [...steps].reverse().findIndex((s) => replaceable(s, m.heal >= 0.55))
     if (lastSit < 0) lastSit = [...steps].reverse().findIndex((s) => replaceable(s, false))
     const idx = conflictIdx >= 0 ? conflictIdx : lastSit >= 0 ? steps.length - 1 - lastSit : -1
-    const owned: BuildStep = { item: extra, kind: 'owned', owned: true, reason: 'acheté' }
+    const owned: BuildStep = {
+      item: extra,
+      kind: 'owned',
+      owned: true,
+      reason: tr('acheté', 'bought')
+    }
     if (idx >= 0) steps.splice(idx, 1, owned)
     else steps.push(owned)
   }
@@ -552,8 +576,11 @@ export function buildItemPlan(
           return petA - petB || a.total - b.total
         })[0]
       next.sellHint = sellable
-        ? `Inventaire plein : vends ${sellable.nameFr}`
-        : 'Inventaire plein : vends un objet pour faire de la place'
+        ? tr(`Inventaire plein : vends ${sellable.label}`, `Inventory full: sell ${sellable.label}`)
+        : tr(
+            'Inventaire plein : vends un objet pour faire de la place',
+            'Inventory full: sell an item to make room'
+          )
     }
   } else if (pending) {
     next = { item: pending.item, remaining: pending.item.total, affordable: false, component: null }
@@ -576,11 +603,14 @@ export function toItemSet(championId: number, champName: string, plan: ItemPlan)
     title: champName,
     championId,
     blocks: [
-      block('Départ', plan.starter),
-      block('Cœur (ordre d’achat)', core),
-      block('Situationnels (adaptés à la composition)', sit),
+      block(tr('Départ', 'Starting items'), plan.starter),
+      block(tr('Cœur (ordre d’achat)', 'Core (buy order)'), core),
       block(
-        'Alternatives',
+        tr('Situationnels (adaptés à la composition)', 'Situational (adapted to the enemy team)'),
+        sit
+      ),
+      block(
+        tr('Alternatives', 'Alternatives'),
         plan.alternatives.map((s) => s.item)
       )
     ].filter((b) => b.items.length > 0)

@@ -3,6 +3,7 @@ import type { Benchmark } from './catalog'
 import type { PersonalItemBonus, ItemPlan } from './items'
 import { norm } from './normalize'
 import { CONTROL_WARD_ID, DEFAULT_BENCH, tipFor, type Category, type GameReport } from './postgame'
+import { fmtNumber, fmtPct, gold as goldText, tr } from '../../../shared/i18n'
 
 // Apprentissage à partir des bilans : l'application s'améliore à chaque partie jouée.
 //
@@ -54,41 +55,41 @@ export interface Learning {
   bonusFor: (champId: string | null) => PersonalItemBonus
 }
 
-const LABELS: Record<string, string> = {
-  'cs-low': 'Farm en début de partie',
-  'gold-behind': 'Retard sur le jungler adverse',
-  'first-item-late': '1er objet tardif',
-  'off-build': 'Achats hors du build conseillé',
-  'no-antiheal': 'Anti-soins absents ou tardifs',
-  'no-mr': 'Pas de résistance magique',
-  'no-armor': 'Pas d’armure',
-  'deaths-gold': 'Morts avec de l’or en poche',
-  'unspent-gold': 'Or non dépensé',
-  'early-deaths': 'Morts avant 14 min',
-  'many-deaths': 'Trop de morts',
-  'kp-low': 'Faible participation',
-  'objectives-lost': 'Objectifs perdus',
-  'grubs-lost': 'Larves du Néant perdues',
-  'no-control-ward': 'Pas de balise de contrôle',
-  'vision-low': 'Vision faible',
-  'cs-good': 'Farm',
-  'gold-ahead': 'Avance sur le jungler adverse',
-  'first-item-fast': 'Rythme d’achat',
-  'follow-build': 'Build adapté',
-  'antiheal-ok': 'Anti-soins',
-  'safe-early': 'Début de partie sans mort',
-  'few-deaths': 'Peu de morts',
-  'kp-good': 'Présence en combat',
-  'objectives-won': 'Contrôle des objectifs',
-  smite: 'Châtiment',
-  'vision-good': 'Vision'
+const LABELS: Record<string, [string, string]> = {
+  'cs-low': ['Farm en début de partie', 'Early farm'],
+  'gold-behind': ['Retard sur le jungler adverse', 'Behind the enemy jungler'],
+  'first-item-late': ['1er objet tardif', 'Late 1st item'],
+  'off-build': ['Achats hors du build conseillé', 'Purchases outside the suggested build'],
+  'no-antiheal': ['Anti-soins absents ou tardifs', 'Missing or late anti-heal'],
+  'no-mr': ['Pas de résistance magique', 'No magic resist'],
+  'no-armor': ['Pas d’armure', 'No armor'],
+  'deaths-gold': ['Morts avec de l’or en poche', 'Deaths with unspent gold'],
+  'unspent-gold': ['Or non dépensé', 'Unspent gold'],
+  'early-deaths': ['Morts avant 14 min', 'Deaths before 14 min'],
+  'many-deaths': ['Trop de morts', 'Too many deaths'],
+  'kp-low': ['Faible participation', 'Low kill participation'],
+  'objectives-lost': ['Objectifs perdus', 'Objectives lost'],
+  'grubs-lost': ['Larves du Néant perdues', 'Voidgrubs lost'],
+  'no-control-ward': ['Pas de balise de contrôle', 'No control ward'],
+  'vision-low': ['Vision faible', 'Low vision'],
+  'cs-good': ['Farm', 'Farm'],
+  'gold-ahead': ['Avance sur le jungler adverse', 'Lead over the enemy jungler'],
+  'first-item-fast': ['Rythme d’achat', 'Item timings'],
+  'follow-build': ['Build adapté', 'Adapted build'],
+  'antiheal-ok': ['Anti-soins', 'Anti-heal'],
+  'safe-early': ['Début de partie sans mort', 'Deathless early game'],
+  'few-deaths': ['Peu de morts', 'Few deaths'],
+  'kp-good': ['Présence en combat', 'Fight presence'],
+  'objectives-won': ['Contrôle des objectifs', 'Objective control'],
+  smite: ['Châtiment', 'Smite'],
+  'vision-good': ['Vision', 'Vision']
 }
 
 const bayes = (wins: number, games: number, prior: number, k: number): number =>
   (wins + k * prior) / (games + k)
 const clamp = (x: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, x))
 const avg = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / Math.max(xs.length, 1)
-const fr1 = (x: number): string => x.toFixed(1).replace('.', ',')
+const fr1 = (x: number): string => fmtNumber(x, 1)
 
 const MIN_CHAMP_GAMES = 4
 const MIN_GLOBAL_GAMES = 6
@@ -127,8 +128,8 @@ export function computeLearning(reports: GameReport[]): Learning {
   for (const r of reports) {
     const champ = r.champ?.id ?? '?'
     for (const it of new Set(r.legendaries)) {
-      count(`*|${norm(it.name)}`, it.name, r.win)
-      count(`${champ}|${norm(it.name)}`, it.name, r.win)
+      count(`*|${norm(it.name)}`, it.label, r.win)
+      count(`${champ}|${norm(it.name)}`, it.label, r.win)
     }
   }
   const delta = (s: { g: number; w: number }): number => bayes(s.w, s.g, base, 6) - base
@@ -150,7 +151,10 @@ export function computeLearning(reports: GameReport[]): Learning {
       if (Math.abs(bonus) < 0.02) return null
       return {
         bonus,
-        reason: bonus >= 0.06 ? `vous réussit (${s.w}/${s.g} V)` : undefined
+        reason:
+          bonus >= 0.06
+            ? tr(`vous réussit (${s.w}/${s.g} V)`, `works for you (${s.w}/${s.g} W)`)
+            : undefined
       }
     }
 
@@ -184,7 +188,7 @@ export function computeLearning(reports: GameReport[]): Learning {
       .sort((a, b) => b[1] - a[1])
       .map(([id, n]) => ({
         id,
-        label: LABELS[id] ?? id,
+        label: LABELS[id] ? tr(...LABELS[id]) : id,
         tip: tone === 'bad' ? tipFor(id, bench) : undefined,
         count: n,
         of: recent.length
@@ -216,40 +220,40 @@ export function computeLearning(reports: GameReport[]): Learning {
     }
     add(
       'overall',
-      'Note globale',
+      tr('Note globale', 'Overall score'),
       (r) => r.overall,
       true,
       (x) => String(Math.round(x))
     )
     add(
       'cs10',
-      'Farm à 10 min',
+      tr('Farm à 10 min', 'Farm at 10 min'),
       (r) => r.stats.cs10,
       true,
       (x) => `${Math.round(x)} cs`
     )
     add(
       'kp',
-      'Participation',
+      tr('Participation', 'Kill participation'),
       (r) => r.stats.kp,
       true,
-      (x) => `${Math.round(x * 100)} %`
+      (x) => fmtPct(x)
     )
     add(
       'deaths',
-      'Morts / 10 min',
+      tr('Morts / 10 min', 'Deaths / 10 min'),
       (r) => (r.facts.players.find((p) => p.pid === r.facts.me)!.d / Math.max(r.minutes, 1)) * 10,
       false,
       fr1
     )
     add(
       'item',
-      '1er objet',
+      tr('1er objet', '1st item'),
       (r) => r.stats.firstItemMin,
       false,
       (x) => `${fr1(x)} min`
     )
-    add('vision', 'Vision / min', (r) => r.stats.visionPerMin, true, fr1)
+    add('vision', tr('Vision / min', 'Vision / min'), (r) => r.stats.visionPerMin, true, fr1)
   }
 
   return {
@@ -292,10 +296,13 @@ export function liveNudges(
 
   const goldWeak = weak.has('unspent-gold') || weak.has('deaths-gold')
   if ((goldWeak && gold >= 1300) || gold >= 2200) {
-    const target = plan?.next?.affordable ? plan.next.item.nameFr : null
+    const target = plan?.next?.affordable ? plan.next.item.label : null
     out.push({
       id: 'gold',
-      text: `${Math.floor(gold)} po en poche : rentrez acheter${target ? ` ${target}` : ''}.`,
+      text: tr(
+        `${goldText(gold)} en poche : rentrez acheter${target ? ` ${target}` : ''}.`,
+        `${goldText(gold)} in your pocket: back to buy${target ? ` ${target}` : ''}.`
+      ),
       tone: 'orange'
     })
   }
@@ -306,7 +313,10 @@ export function liveNudges(
   ) {
     out.push({
       id: 'ward',
-      text: 'Pas de balise de contrôle : prenez-en une au prochain retour.',
+      text: tr(
+        'Pas de balise de contrôle : prenez-en une au prochain retour.',
+        'No control ward: grab one on your next back.'
+      ),
       tone: 'blue'
     })
   }
@@ -316,14 +326,20 @@ export function liveNudges(
     if (perMin < target * 0.88)
       out.push({
         id: 'cs',
-        text: `Farm : ${fr1(perMin)} cs/min (repère ${fr1(target)}). Enchaînez les camps.`,
+        text: tr(
+          `Farm : ${fr1(perMin)} cs/min (repère ${fr1(target)}). Enchaînez les camps.`,
+          `Farm: ${fr1(perMin)} CS/min (benchmark ${fr1(target)}). Chain your camps.`
+        ),
         tone: 'orange'
       })
   }
   if (weak.has('early-deaths') && t < 14 * 60) {
     out.push({
       id: 'early',
-      text: 'Rappel : pas de combat sans vision ni avantage avant 14 min.',
+      text: tr(
+        'Rappel : pas de combat sans vision ni avantage avant 14 min.',
+        'Reminder: no fights without vision or an advantage before 14 min.'
+      ),
       tone: 'blue'
     })
   }

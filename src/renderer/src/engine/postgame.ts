@@ -3,6 +3,7 @@ import { getBuild, type Benchmark, type Catalog } from './catalog'
 import type { ChampInfo, GameData, ItemInfo } from './gameData'
 import { buildItemPlan } from './items'
 import { analyzeThreat } from './threat'
+import { fmtNumber, fmtPct, gold, tr } from '../../../shared/i18n'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -87,11 +88,13 @@ export function normalizeGame(
   resolveChamp?: ChampResolver
 ): GameFacts | { skip: string } {
   const g: any = (raw.game as any)?.info ?? raw.game
-  if (!g || !Array.isArray(g.participants)) return { skip: 'données illisibles' }
+  if (!g || !Array.isArray(g.participants))
+    return { skip: tr('données illisibles', 'unreadable data') }
   const mapId = num(g.mapId)
-  if (mapId && mapId !== 11) return { skip: 'pas la Faille de l’invocateur' }
+  if (mapId && mapId !== 11)
+    return { skip: tr('pas la Faille de l’invocateur', 'not Summoner’s Rift') }
   const duration = num(g.gameDuration) > 20000 ? num(g.gameDuration) / 1000 : num(g.gameDuration)
-  if (duration < 600) return { skip: 'partie trop courte (remake)' }
+  if (duration < 600) return { skip: tr('partie trop courte (remake)', 'game too short (remake)') }
 
   // Joueur local : puuid, sinon identifiant d'invocateur.
   let me = 0
@@ -108,7 +111,7 @@ export function normalizeGame(
     const p = g.participants.find((x: any) => raw.puuid && x.puuid === raw.puuid)
     if (p) me = num(p.participantId)
   }
-  if (!me) return { skip: 'joueur introuvable dans la partie' }
+  if (!me) return { skip: tr('joueur introuvable dans la partie', 'player not found in the game') }
 
   const players: FactPlayer[] = g.participants.map((p: any): FactPlayer => {
     const s = p.stats ?? p
@@ -139,7 +142,8 @@ export function normalizeGame(
     }
   })
   const mine = players.find((p) => p.pid === me)
-  if (!mine?.smite) return { skip: 'pas joué en jungle (sans Châtiment)' }
+  if (!mine?.smite)
+    return { skip: tr('pas joué en jungle (sans Châtiment)', 'not played as jungler (no Smite)') }
 
   const sm = g.participants.find((p: any) => num(p.participantId) === me)
   const st = sm?.stats ?? {}
@@ -401,12 +405,16 @@ export function liveAt(
 
 export type Category = 'farm' | 'build' | 'fights' | 'objectives' | 'vision'
 
-export const CATEGORY_LABEL: Record<Category, string> = {
-  farm: 'Farm et avance',
-  build: 'Build',
-  fights: 'Combats et morts',
-  objectives: 'Objectifs',
-  vision: 'Vision'
+const CATEGORY_LABEL: Record<Category, [string, string]> = {
+  farm: ['Farm et avance', 'Farm & lead'],
+  build: ['Build', 'Build'],
+  fights: ['Combats et morts', 'Fights & deaths'],
+  objectives: ['Objectifs', 'Objectives'],
+  vision: ['Vision', 'Vision']
+}
+
+export function categoryLabel(c: Category): string {
+  return tr(...CATEGORY_LABEL[c])
 }
 
 export interface Finding {
@@ -487,23 +495,71 @@ export const DEFAULT_BENCH: Benchmark = {
 }
 
 /** Conseils associés aux points faibles (affichés en rappel avant les parties suivantes). */
-export const TIPS: Record<string, string> = {
-  'cs-low': 'Enchaînez les camps entre deux actions : pas de temps mort sans farm.',
-  'gold-behind': 'Suivez le jungler adverse : contre-gank ou contre-jungle du côté opposé.',
-  'first-item-late': 'Visez votre 1er objet vers {first} min : farm + retour au bon moment.',
-  'off-build': 'Suivez l’ordre d’objets conseillé, il s’adapte à la partie.',
-  'no-antiheal': 'Face aux soins, achetez le composant anti-soins tôt.',
-  'no-mr': 'Face à beaucoup de magie, prenez de la résistance magique.',
-  'no-armor': 'Face à beaucoup de dégâts physiques, prenez de l’armure.',
-  'deaths-gold': 'Rentrez dépenser votre or avant de prendre un risque.',
-  'unspent-gold': 'Rentrez dès que vous avez de quoi acheter un composant important.',
-  'early-deaths': 'Avant 14 min, ne vous battez pas sans vision ni avantage de niveau.',
-  'many-deaths': 'Moins de morts : placez-vous derrière vos tanks en combat.',
-  'kp-low': 'Participez davantage aux actions de vos voies (ganks, contre-ganks).',
-  'objectives-lost': 'Préparez les dragons 1 min avant : vision, retour, poussée des voies.',
-  'grubs-lost': 'Les larves du Néant comptent : prenez-les quand le haut est poussé.',
-  'no-control-ward': 'Achetez une balise de contrôle à chaque retour.',
-  'vision-low': 'Posez vos balises et changez de totem selon la phase de jeu.'
+const TIPS: Record<string, [string, string]> = {
+  'cs-low': [
+    'Enchaînez les camps entre deux actions : pas de temps mort sans farm.',
+    'Chain camps between plays: no idle time without farming.'
+  ],
+  'gold-behind': [
+    'Suivez le jungler adverse : contre-gank ou contre-jungle du côté opposé.',
+    'Track the enemy jungler: counter-gank or invade the opposite side.'
+  ],
+  'first-item-late': [
+    'Visez votre 1er objet vers {first} min : farm + retour au bon moment.',
+    'Aim for your 1st item around {first} min: farm + back at the right time.'
+  ],
+  'off-build': [
+    'Suivez l’ordre d’objets conseillé, il s’adapte à la partie.',
+    'Follow the suggested item order, it adapts to the game.'
+  ],
+  'no-antiheal': [
+    'Face aux soins, achetez le composant anti-soins tôt.',
+    'Against healing, buy the anti-heal component early.'
+  ],
+  'no-mr': [
+    'Face à beaucoup de magie, prenez de la résistance magique.',
+    'Against heavy magic damage, build magic resist.'
+  ],
+  'no-armor': [
+    'Face à beaucoup de dégâts physiques, prenez de l’armure.',
+    'Against heavy physical damage, build armor.'
+  ],
+  'deaths-gold': [
+    'Rentrez dépenser votre or avant de prendre un risque.',
+    'Back and spend your gold before taking a risk.'
+  ],
+  'unspent-gold': [
+    'Rentrez dès que vous avez de quoi acheter un composant important.',
+    'Back as soon as you can afford a key component.'
+  ],
+  'early-deaths': [
+    'Avant 14 min, ne vous battez pas sans vision ni avantage de niveau.',
+    'Before 14 min, don’t fight without vision or a level lead.'
+  ],
+  'many-deaths': [
+    'Moins de morts : placez-vous derrière vos tanks en combat.',
+    'Fewer deaths: position behind your tanks in fights.'
+  ],
+  'kp-low': [
+    'Participez davantage aux actions de vos voies (ganks, contre-ganks).',
+    'Join more plays in your lanes (ganks, counter-ganks).'
+  ],
+  'objectives-lost': [
+    'Préparez les dragons 1 min avant : vision, retour, poussée des voies.',
+    'Set up dragons 1 min early: vision, reset, push the lanes.'
+  ],
+  'grubs-lost': [
+    'Les larves du Néant comptent : prenez-les quand le haut est poussé.',
+    'Voidgrubs matter: take them when top lane is pushed.'
+  ],
+  'no-control-ward': [
+    'Achetez une balise de contrôle à chaque retour.',
+    'Buy a control ward on every back.'
+  ],
+  'vision-low': [
+    'Posez vos balises et changez de totem selon la phase de jeu.',
+    'Place your wards and swap trinkets as the game evolves.'
+  ]
 }
 
 const mean = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0)
@@ -520,8 +576,9 @@ function rate(value: number, target: number, lowerIsBetter = false): number {
 
 const fmtMin = (sec: number): string =>
   `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
-const fr1 = (x: number): string => x.toFixed(1).replace('.', ',')
-const signed = (x: number): string => (x >= 0 ? `+${Math.round(x)}` : `${Math.round(x)}`)
+const fr1 = (x: number): string => fmtNumber(x, 1)
+const signed = (x: number): string => (x >= 0 ? `+${gold(x)}` : gold(x))
+const bench_ = (v: string): string => tr(`Repère Master+ : ${v}.`, `Master+ benchmark: ${v}.`)
 
 const OBJ_WEIGHT: Record<MonsterKind, number> = {
   dragon: 1,
@@ -585,7 +642,9 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
   const level15 = frameVal(15, meIdx, 3)
   const levelDiff15 =
     level15 !== null && enemyJIdx >= 0 ? level15 - frameVal(15, enemyJIdx, 3)! : null
-  const ejName = enemyJ ? (gd.champions.get(enemyJ.champ)?.name ?? 'le jungler adverse') : ''
+  const ejName = enemyJ
+    ? (gd.champions.get(enemyJ.champ)?.label ?? tr('le jungler adverse', 'the enemy jungler'))
+    : ''
 
   if (cs10 !== null) {
     const s = rate(cs10, bench.cs10)
@@ -595,8 +654,8 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'cs-low',
         cat: 'farm',
         tone: 'bad',
-        title: `Farm faible : ${cs10} cs à 10 min`,
-        detail: `Repère Master+ : ${Math.round(bench.cs10)} cs.`,
+        title: tr(`Farm faible : ${cs10} cs à 10 min`, `Low farm: ${cs10} CS at 10 min`),
+        detail: bench_(`${Math.round(bench.cs10)} cs`),
         impact: 0.6 + (45 - s) / 100
       })
     else if (s >= 85)
@@ -604,8 +663,8 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'cs-good',
         cat: 'farm',
         tone: 'good',
-        title: `Très bon farm : ${cs10} cs à 10 min`,
-        detail: `Repère Master+ : ${Math.round(bench.cs10)} cs.`,
+        title: tr(`Très bon farm : ${cs10} cs à 10 min`, `Great farm: ${cs10} CS at 10 min`),
+        detail: bench_(`${Math.round(bench.cs10)} cs`),
         impact: 0.5
       })
   } else {
@@ -619,10 +678,13 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'gold-behind',
         cat: 'farm',
         tone: 'bad',
-        title: `En retard sur ${ejName} : ${signed(goldDiff15)} po à 15 min`,
+        title: tr(
+          `En retard sur ${ejName} : ${signed(goldDiff15)} à 15 min`,
+          `Behind ${ejName}: ${signed(goldDiff15)} at 15 min`
+        ),
         detail:
           levelDiff15 !== null && levelDiff15 < 0
-            ? `${levelDiff15} niveau(x) de retard.`
+            ? tr(`${-levelDiff15} niveau(x) de retard.`, `${-levelDiff15} level(s) behind.`)
             : undefined,
         impact: 0.6 + Math.min(0.4, -goldDiff15 / 5000)
       })
@@ -631,7 +693,10 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'gold-ahead',
         cat: 'farm',
         tone: 'good',
-        title: `En avance sur ${ejName} : ${signed(goldDiff15)} po à 15 min`,
+        title: tr(
+          `En avance sur ${ejName} : ${signed(goldDiff15)} à 15 min`,
+          `Ahead of ${ejName}: ${signed(goldDiff15)} at 15 min`
+        ),
         impact: 0.5 + Math.min(0.4, goldDiff15 / 5000)
       })
   }
@@ -669,8 +734,11 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
           id: 'first-item-late',
           cat: 'build',
           tone: 'bad',
-          title: `1er objet tardif : ${fr1(firstItemMin)} min`,
-          detail: `Repère Master+ : ${fr1(bench.firstItem)} min.`,
+          title: tr(
+            `1er objet tardif : ${fr1(firstItemMin)} min`,
+            `Late 1st item: ${fr1(firstItemMin)} min`
+          ),
+          detail: bench_(`${fr1(bench.firstItem)} min`),
           impact: 0.5 + Math.min(0.3, (firstItemMin - bench.firstItem) / 20)
         })
       else if (firstItemMin <= bench.firstItem - 0.5)
@@ -678,7 +746,10 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
           id: 'first-item-fast',
           cat: 'build',
           tone: 'good',
-          title: `1er objet rapide : ${fr1(firstItemMin)} min`,
+          title: tr(
+            `1er objet rapide : ${fr1(firstItemMin)} min`,
+            `Fast 1st item: ${fr1(firstItemMin)} min`
+          ),
           impact: 0.4
         })
     } else if (minutes >= 16) {
@@ -687,7 +758,7 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'first-item-late',
         cat: 'build',
         tone: 'bad',
-        title: 'Aucun objet légendaire terminé',
+        title: tr('Aucun objet légendaire terminé', 'No legendary item completed'),
         impact: 0.8
       })
     }
@@ -762,10 +833,14 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'off-build',
         cat: 'build',
         tone: 'bad',
-        title: `${off.length} objet(s) hors du build conseillé`,
+        title: tr(
+          `${off.length} objet(s) hors du build conseillé`,
+          `${off.length} item(s) outside the suggested build`
+        ),
         detail: off
           .map(
-            (p) => `${p.item.nameFr}${p.suggested ? ` (conseillé : ${p.suggested.nameFr})` : ''}`
+            (p) =>
+              `${p.item.label}${p.suggested ? ` (${tr('conseillé', 'suggested')}: ${p.suggested.label})` : ''}`
           )
           .join(' · '),
         impact: 0.35 + 0.1 * off.length
@@ -775,8 +850,11 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'follow-build',
         cat: 'build',
         tone: 'good',
-        title: 'Build adapté à la partie',
-        detail: 'Vos achats suivent les conseils calculés pour cette composition.',
+        title: tr('Build adapté à la partie', 'Build adapted to the game'),
+        detail: tr(
+          'Vos achats suivent les conseils calculés pour cette composition.',
+          'Your purchases follow the advice computed for this team comp.'
+        ),
         impact: 0.35
       })
   }
@@ -796,7 +874,7 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
     const healers = [...foes]
       .sort((a, b) => b.heal - a.heal)
       .slice(0, 2)
-      .map((p) => gd.champions.get(p.champ)?.name)
+      .map((p) => gd.champions.get(p.champ)?.label)
       .filter(Boolean)
       .join(', ')
     if (!ownsGrievous) {
@@ -805,8 +883,8 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'no-antiheal',
         cat: 'build',
         tone: 'bad',
-        title: 'Pas d’anti-soins',
-        detail: `Soins adverses importants (${healers}).`,
+        title: tr('Pas d’anti-soins', 'No anti-heal'),
+        detail: tr(`Soins adverses importants (${healers}).`, `Strong enemy healing (${healers}).`),
         impact: 0.7
       })
     } else if (grievousBuy && grievousBuy.t > 18 * 60) {
@@ -814,8 +892,14 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'no-antiheal',
         cat: 'build',
         tone: 'bad',
-        title: `Anti-soins tardif (${fmtMin(grievousBuy.t)})`,
-        detail: `Soins adverses importants (${healers}) : composant dès le 1er ou 2e retour.`,
+        title: tr(
+          `Anti-soins tardif (${fmtMin(grievousBuy.t)})`,
+          `Late anti-heal (${fmtMin(grievousBuy.t)})`
+        ),
+        detail: tr(
+          `Soins adverses importants (${healers}) : composant dès le 1er ou 2e retour.`,
+          `Strong enemy healing (${healers}): component on your 1st or 2nd back.`
+        ),
         impact: 0.45
       })
     } else {
@@ -823,8 +907,8 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'antiheal-ok',
         cat: 'build',
         tone: 'good',
-        title: 'Anti-soins pris à temps',
-        detail: healers ? `Face à ${healers}.` : undefined,
+        title: tr('Anti-soins pris à temps', 'Anti-heal on time'),
+        detail: healers ? tr(`Face à ${healers}.`, `Against ${healers}.`) : undefined,
         impact: 0.35
       })
     }
@@ -843,8 +927,11 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'no-mr',
         cat: 'build',
         tone: 'bad',
-        title: 'Aucune résistance magique',
-        detail: `${Math.round(magicShare * 100)} % des dégâts adverses étaient magiques et vous êtes mort ${me.d} fois.`,
+        title: tr('Aucune résistance magique', 'No magic resist'),
+        detail: tr(
+          `${fmtPct(magicShare)} des dégâts adverses étaient magiques et vous êtes mort ${me.d} fois.`,
+          `${fmtPct(magicShare)} of enemy damage was magic and you died ${me.d} times.`
+        ),
         impact: 0.6
       })
     else if (magicShare <= 0.38 && !hasStat('FlatArmorMod'))
@@ -852,8 +939,11 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'no-armor',
         cat: 'build',
         tone: 'bad',
-        title: 'Aucune armure',
-        detail: `${Math.round((1 - magicShare) * 100)} % des dégâts adverses étaient physiques et vous êtes mort ${me.d} fois.`,
+        title: tr('Aucune armure', 'No armor'),
+        detail: tr(
+          `${fmtPct(1 - magicShare)} des dégâts adverses étaient physiques et vous êtes mort ${me.d} fois.`,
+          `${fmtPct(1 - magicShare)} of enemy damage was physical and you died ${me.d} times.`
+        ),
         impact: 0.6
       })
   }
@@ -868,8 +958,11 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'kp-low',
         cat: 'fights',
         tone: 'bad',
-        title: `Participation faible : ${Math.round(kp * 100)} % des éliminations`,
-        detail: `Repère Master+ : ${Math.round(bench.kp * 100)} %.`,
+        title: tr(
+          `Participation faible : ${fmtPct(kp)} des éliminations`,
+          `Low kill participation: ${fmtPct(kp)}`
+        ),
+        detail: bench_(fmtPct(bench.kp)),
         impact: 0.55
       })
     else if (kp >= bench.kp * 1.1)
@@ -877,7 +970,10 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'kp-good',
         cat: 'fights',
         tone: 'good',
-        title: `Très présent : ${Math.round(kp * 100)} % des éliminations`,
+        title: tr(
+          `Très présent : ${fmtPct(kp)} des éliminations`,
+          `High kill participation: ${fmtPct(kp)}`
+        ),
         impact: 0.45
       })
   }
@@ -908,8 +1004,11 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'early-deaths',
         cat: 'fights',
         tone: 'bad',
-        title: `${earlyDeaths} morts avant 14 min`,
-        detail: 'Chaque mort en début de partie donne de l’avance au jungler adverse.',
+        title: tr(`${earlyDeaths} morts avant 14 min`, `${earlyDeaths} deaths before 14 min`),
+        detail: tr(
+          'Chaque mort en début de partie donne de l’avance au jungler adverse.',
+          'Every early death gives the enemy jungler a lead.'
+        ),
         impact: 0.6 + 0.08 * earlyDeaths
       })
     } else if (earlyDeaths === 0 && minutes >= 15) {
@@ -917,7 +1016,7 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'safe-early',
         cat: 'fights',
         tone: 'good',
-        title: 'Aucune mort avant 14 min',
+        title: tr('Aucune mort avant 14 min', 'No death before 14 min'),
         impact: 0.35
       })
     }
@@ -926,8 +1025,14 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'deaths-gold',
         cat: 'fights',
         tone: 'bad',
-        title: `${deathsWithGold} morts avec beaucoup d’or non dépensé`,
-        detail: `Jusqu’à ${Math.round(worstGold)} po en poche au moment de mourir.`,
+        title: tr(
+          `${deathsWithGold} morts avec beaucoup d’or non dépensé`,
+          `${deathsWithGold} deaths with lots of unspent gold`
+        ),
+        detail: tr(
+          `Jusqu’à ${gold(worstGold)} en poche au moment de mourir.`,
+          `Up to ${gold(worstGold)} in your pocket when you died.`
+        ),
         impact: 0.55
       })
   }
@@ -936,8 +1041,11 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
       id: 'many-deaths',
       cat: 'fights',
       tone: 'bad',
-      title: `${me.d} morts`,
-      detail: `${fr1(deathsPer10)} morts toutes les 10 min (repère : moins de 1,6).`,
+      title: tr(`${me.d} morts`, `${me.d} deaths`),
+      detail: tr(
+        `${fr1(deathsPer10)} morts toutes les 10 min (repère : moins de ${fr1(1.6)}).`,
+        `${fr1(deathsPer10)} deaths per 10 min (benchmark: under ${fr1(1.6)}).`
+      ),
       impact: 0.5 + Math.min(0.3, (me.d - 9) * 0.05)
     })
   else if (me.d <= 2 && minutes >= 22)
@@ -945,7 +1053,7 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
       id: 'few-deaths',
       cat: 'fights',
       tone: 'good',
-      title: `Seulement ${me.d} mort(s)`,
+      title: tr(`Seulement ${me.d} mort(s)`, `Only ${me.d} death(s)`),
       impact: 0.4
     })
 
@@ -962,8 +1070,14 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'unspent-gold',
         cat: 'farm',
         tone: 'bad',
-        title: `Or non dépensé ${Math.round(unspentShare * 100)} % du temps`,
-        detail: 'Plus de 1 500 po en poche : un retour plus tôt aurait donné un objet d’avance.',
+        title: tr(
+          `Or non dépensé ${fmtPct(unspentShare)} du temps`,
+          `Unspent gold ${fmtPct(unspentShare)} of the time`
+        ),
+        detail: tr(
+          `Plus de ${gold(1500)} en poche : un retour plus tôt aurait donné un objet d’avance.`,
+          `Over ${gold(1500)} in your pocket: an earlier back would have given you an item lead.`
+        ),
         impact: 0.4 + unspentShare * 0.5
       })
   }
@@ -989,8 +1103,11 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'objectives-lost',
         cat: 'objectives',
         tone: 'bad',
-        title: `Objectifs perdus (dragons ${dragons})`,
-        detail: `Votre équipe : ${Math.round(share * 100)} % des objectifs neutres.`,
+        title: tr(`Objectifs perdus (dragons ${dragons})`, `Objectives lost (dragons ${dragons})`),
+        detail: tr(
+          `Votre équipe : ${fmtPct(share)} des objectifs neutres.`,
+          `Your team: ${fmtPct(share)} of neutral objectives.`
+        ),
         impact: 0.55 + (0.35 - share)
       })
     else if (totalObj >= 3 && share >= 0.65)
@@ -998,8 +1115,14 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'objectives-won',
         cat: 'objectives',
         tone: 'good',
-        title: `Contrôle des objectifs (dragons ${dragons})`,
-        detail: `Votre équipe : ${Math.round(share * 100)} % des objectifs neutres.`,
+        title: tr(
+          `Contrôle des objectifs (dragons ${dragons})`,
+          `Objective control (dragons ${dragons})`
+        ),
+        detail: tr(
+          `Votre équipe : ${fmtPct(share)} des objectifs neutres.`,
+          `Your team: ${fmtPct(share)} of neutral objectives.`
+        ),
         impact: 0.5 + (share - 0.65)
       })
     if (enemy.grubs >= 5 && team.grubs <= 1)
@@ -1007,7 +1130,7 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'grubs-lost',
         cat: 'objectives',
         tone: 'bad',
-        title: `Larves du Néant : ${team.grubs}/${enemy.grubs}`,
+        title: `${tr('Larves du Néant', 'Voidgrubs')}: ${team.grubs}/${enemy.grubs}`,
         impact: 0.35
       })
     if (smited >= 4)
@@ -1015,7 +1138,10 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
         id: 'smite',
         cat: 'objectives',
         tone: 'good',
-        title: `${smited} objectifs sécurisés au Châtiment`,
+        title: tr(
+          `${smited} objectifs sécurisés au Châtiment`,
+          `${smited} objectives secured with Smite`
+        ),
         impact: 0.3
       })
   }
@@ -1034,7 +1160,7 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
       id: 'no-control-ward',
       cat: 'vision',
       tone: 'bad',
-      title: 'Aucune balise de contrôle achetée',
+      title: tr('Aucune balise de contrôle achetée', 'No control ward bought'),
       impact: 0.45
     })
   else if (visionPerMin < bench.visionPerMin * 0.7)
@@ -1042,8 +1168,11 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
       id: 'vision-low',
       cat: 'vision',
       tone: 'bad',
-      title: `Vision faible : ${fr1(visionPerMin)} / min`,
-      detail: `Repère Master+ : ${fr1(bench.visionPerMin)} / min.`,
+      title: tr(
+        `Vision faible : ${fr1(visionPerMin)} / min`,
+        `Low vision: ${fr1(visionPerMin)} / min`
+      ),
+      detail: bench_(`${fr1(bench.visionPerMin)} / min`),
       impact: 0.35
     })
   else if (visionPerMin >= bench.visionPerMin * 1.15)
@@ -1051,7 +1180,10 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
       id: 'vision-good',
       cat: 'vision',
       tone: 'good',
-      title: `Bonne vision : ${fr1(visionPerMin)} / min`,
+      title: tr(
+        `Bonne vision : ${fr1(visionPerMin)} / min`,
+        `Good vision: ${fr1(visionPerMin)} / min`
+      ),
       impact: 0.3
     })
 
@@ -1114,7 +1246,8 @@ export function analyzeGame(gd: GameData, catalog: Catalog, facts: GameFacts): G
 
 /** Conseil d'un point faible, avec les repères remplacés. */
 export function tipFor(id: string, bench: Benchmark): string | undefined {
-  return TIPS[id]?.replace('{first}', fr1(bench.firstItem))
+  const tip = TIPS[id]
+  return tip ? tr(...tip).replace('{first}', fr1(bench.firstItem)) : undefined
 }
 
 /** Identifiant de l'objet balise de contrôle (pour les rappels en partie). */

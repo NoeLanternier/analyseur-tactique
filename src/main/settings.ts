@@ -41,5 +41,7 @@ function sanitize(raw: Record<string, unknown>): Settings {
   if (typeof raw.launchAtStartup === 'boolean') s.launchAtStartup = raw.launchAtStartup
   if (typeof raw.autoReview === 'boolean') s.autoReview = raw.autoReview
   if (typeof raw.personalLearning === 'boolean') s.personalLearning = raw.personalLearning
+  if (raw.language === 'auto' || raw.language === 'fr' || raw.language === 'en')
+    s.language = raw.language
   return s
 }
