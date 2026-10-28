@@ -15,11 +15,17 @@ import { tr } from '../../../shared/i18n'
 // Catalogue des builds : base tactique + mise à jour distante éventuelle + build générique pour
 // tout champion absent de la base (nouveau champion, pick original...).
 
-/** Statistiques d'un jungler sur le patch (méta distante). vs : [parties, taux de victoire]. */
+/**
+ * Statistiques d'un jungler sur le patch (méta distante), en [parties, taux de victoire] :
+ * vs = contre chaque jungler adverse, with = avec chaque champion allié, against = contre chaque
+ * adversaire hors jungler (with / against absents des méta plus anciennes).
+ */
 export interface JunglerStat {
   games: number
   winRate: number
   vs: Record<string, [number, number]>
+  with: Record<string, [number, number]>
+  against: Record<string, [number, number]>
 }
 
 /** Repères d'un jungler Master+ (moyennes du patch, méta distante). */
@@ -190,11 +196,20 @@ function parseJunglerStats(raw: any): Record<string, JunglerStat> | undefined {
   const out: Record<string, JunglerStat> = {}
   for (const [id, j] of Object.entries<any>(raw)) {
     if (num(j?.games) === null || num(j?.winRate) === null) continue
-    const vs: Record<string, [number, number]> = {}
-    for (const [enemy, v] of Object.entries<any>(j.vs ?? {})) {
-      if (Array.isArray(v) && num(v[0]) !== null && num(v[1]) !== null) vs[enemy] = [v[0], v[1]]
+    const pairs = (m: any): Record<string, [number, number]> => {
+      const r: Record<string, [number, number]> = {}
+      for (const [k, v] of Object.entries<any>(m ?? {})) {
+        if (Array.isArray(v) && num(v[0]) !== null && num(v[1]) !== null) r[k] = [v[0], v[1]]
+      }
+      return r
     }
-    out[id] = { games: j.games, winRate: j.winRate, vs }
+    out[id] = {
+      games: j.games,
+      winRate: j.winRate,
+      vs: pairs(j.vs),
+      with: pairs(j.with),
+      against: pairs(j.against)
+    }
   }
   return Object.keys(out).length ? out : undefined
 }

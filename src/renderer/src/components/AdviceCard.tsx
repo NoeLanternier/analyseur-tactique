@@ -57,6 +57,17 @@ export function AdviceCard({ t }: { t: TactiqueState }): ReactElement | null {
             ) : undefined
           }
         >
+          <p className="mb-2 text-[10px] leading-snug text-slate-500">
+            {advice.known.allies + advice.known.enemies === 0
+              ? tr(
+                  'Aucun champion choisi : conseils sur la méta seule, affinés à chaque choix.',
+                  'No champion picked yet: advice from the meta alone, refined with each pick.'
+                )
+              : tr(
+                  `D’après ${advice.known.allies}/4 alliés et ${advice.known.enemies}/5 adversaires choisis.`,
+                  `Based on ${advice.known.allies}/4 allies and ${advice.known.enemies}/5 enemies picked.`
+                )}
+          </p>
           <ul className="flex flex-col gap-2">
             {advice.picks.map((p) => (
               <li key={p.champ.id} className="flex items-center gap-2">
@@ -75,8 +86,18 @@ export function AdviceCard({ t }: { t: TactiqueState }): ReactElement | null {
                         <Sparkles size={10} /> {tr('hors de tes champions', 'outside your pool')}
                       </span>
                     )}
+                    {p.blind === 'risky' && (
+                      <span className="shrink-0 rounded bg-orange-500/15 px-1 text-[9px] text-orange-300">
+                        {tr('risqué si choisi tôt', 'risky to pick early')}
+                      </span>
+                    )}
+                    {p.blind === 'safe' && (
+                      <span className="shrink-0 rounded bg-emerald-500/15 px-1 text-[9px] text-emerald-300">
+                        {tr('sûr si choisi tôt', 'safe to pick early')}
+                      </span>
+                    )}
                   </div>
-                  <div className="truncate text-[10px] text-slate-400">
+                  <div className="line-clamp-2 text-[10px] leading-snug text-slate-400">
                     {p.reasons.slice(1).join(' · ') || p.reasons[0] || ''}
                   </div>
                 </div>

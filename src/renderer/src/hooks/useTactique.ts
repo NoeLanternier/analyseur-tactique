@@ -10,7 +10,7 @@ import {
   type RecommendedRunePage,
   type Settings
 } from '../../../shared/types'
-import { computeDraftAdvice, type DraftAdvice } from '../engine/draftAdvice'
+import { computeDraftAdvice, type DraftAdvice, type PersonalRecord } from '../engine/draftAdvice'
 import {
   defaultCatalog,
   getBuild,
@@ -276,15 +276,6 @@ export function useTactique(): TactiqueState {
     }
   }, [lcuStatus, phase])
 
-  const advice = useMemo(
-    () =>
-      gd && phase === 'ChampSelect' && !draft.isLocked
-        ? computeDraftAdvice(gd, catalog, draft, pool)
-        : null,
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- lang : les textes calculés suivent la langue
-    [gd, phase, draft, catalog, pool, lang]
-  )
-
   const threat = useMemo(
     () =>
       gd
@@ -320,6 +311,28 @@ export function useTactique(): TactiqueState {
   }, [gd, champ, threat, riot, genericBuild, build, settings.runeSource])
 
   const review = useReview(gd, catalog, settings.autoReview, lang)
+
+  // Résultats du joueur par champion (bilans), pour les conseils de pick.
+  const personalRecord = useMemo(() => {
+    const m: PersonalRecord = new Map()
+    for (const r of review.reports) {
+      if (!r.champ) continue
+      const rec = m.get(r.champ.id) ?? { games: 0, wins: 0 }
+      rec.games++
+      if (r.win) rec.wins++
+      m.set(r.champ.id, rec)
+    }
+    return m
+  }, [review.reports])
+
+  const advice = useMemo(
+    () =>
+      gd && phase === 'ChampSelect' && !draft.isLocked
+        ? computeDraftAdvice(gd, catalog, draft, pool, personalRecord)
+        : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lang : les textes calculés suivent la langue
+    [gd, phase, draft, catalog, pool, personalRecord, lang]
+  )
   const personal = useMemo(
     () =>
       settings.personalLearning && review.learning.games > 0
